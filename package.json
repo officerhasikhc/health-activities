@@ -1,0 +1,16 @@
+{
+  "name": "athar",
+  "version": "1.1.0",
+  "description": "أثر — منصة توثيق الفعاليات والمبادرات (مركز صحي حاسك)",
+  "private": true,
+  "scripts": {
+    "login": "clasp login",
+    "push": "clasp push -f",
+    "pull": "clasp pull",
+    "open": "clasp open",
+    "deploy": "clasp push -f && clasp deploy -i %DEPLOYMENT_ID% -d auto"
+  },
+  "devDependencies": {
+    "@google/clasp": "2.4.2"
+  }
+}

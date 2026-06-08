@@ -1,0 +1,531 @@
+<script>
+/* ====================== حالة عامة ====================== */
+var USER = null;          // {no,name,role,title}
+var CONFIG = null;        // {activity_type, target_group, mechanism}
+var FORM = null;
+var DRAFT_KEY = 'athar_draft';
+var REC_CACHE = {};       // ذاكرة مؤقتة للسجل حسب (سنة|شهر)
+var DASH_CACHE = null;    // ذاكرة مؤقتة للمؤشرات
+
+function invalidateCaches(){ REC_CACHE = {}; DASH_CACHE = null; }
+
+/* ====================== مساعد استدعاء الخادم ====================== */
+function run(fn){
+  var args = Array.prototype.slice.call(arguments,1);
+  return new Promise(function(res,rej){
+    google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn].apply(null,args);
+  });
+}
+
+/* ====================== التنبيهات ====================== */
+var toastT;
+function toast(msg, type){
+  var t=document.getElementById('toast');
+  t.textContent=msg; t.className='show '+(type||'');
+  clearTimeout(toastT);
+  toastT=setTimeout(function(){ t.className=''; },2800);
+}
+
+/* ====================== الدخول (استدعاء واحد) ====================== */
+function doLogin(){
+  var no=document.getElementById('empNo').value.trim();
+  var btn=document.getElementById('loginBtn');
+  var err=document.getElementById('loginErr');
+  err.textContent='';
+  if(!no){ err.textContent='أدخل الرقم الوظيفي.'; return; }
+  btn.disabled=true; btn.textContent='جارٍ التحقق…';
+  run('init',no).then(function(r){
+    btn.disabled=false; btn.textContent='دخول';
+    if(!r.ok){ err.textContent=r.msg; return; }
+    USER=r.user; CONFIG=r.config;
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    document.getElementById('whoName').textContent=USER.name;
+    document.getElementById('whoTitle').textContent=USER.title;
+    boot();
+  }).catch(function(){
+    btn.disabled=false; btn.textContent='دخول';
+    err.textContent='تعذّر الاتصال، أعد المحاولة.';
+  });
+}
+document.addEventListener('keydown',function(e){
+  if(e.key==='Enter' && !document.getElementById('loginScreen').classList.contains('hidden')) doLogin();
+});
+function logout(){ USER=null; location.reload(); }
+
+/* ====================== الإقلاع ====================== */
+function boot(){
+  renderTabs();
+  show('register');
+  syncOutbox();      // رفع أي محفوظ محليًا من جلسة سابقة
+  updatePending();
+}
+
+function renderTabs(){
+  var tabs=[
+    {id:'register', label:'تسجيل فعالية'},
+    {id:'records',  label:'السجل'},
+    {id:'dashboard',label:'المؤشرات'}
+  ];
+  if(USER.role==='admin') tabs.push({id:'admin', label:'الإدارة'});
+  document.getElementById('tabsBar').innerHTML=tabs.map(function(t){
+    return '<button class="tab" data-tab="'+t.id+'" onclick="show(\''+t.id+'\')">'+t.label+'</button>';
+  }).join('');
+}
+function setActiveTab(id){
+  document.querySelectorAll('.tab').forEach(function(el){
+    el.classList.toggle('active', el.getAttribute('data-tab')===id);
+  });
+}
+function show(tab){
+  setActiveTab(tab);
+  if(tab==='register') renderForm();
+  else if(tab==='records') renderRecords();
+  else if(tab==='dashboard') renderDashboard();
+  else if(tab==='admin') renderAdmin();
+}
+
+/* ====================== نموذج التسجيل ====================== */
+function newForm(){
+  return { id:null, type:'', world_day:'', title:'', objective:'',
+    target_groups:[], event_date:'', location:'', mechanism:'',
+    beneficiaries:'', has_partnership:false, partners:[],
+    photos:[], existing_photo_ids:[], photo_folder_id:'', notes:'',
+    executor_no:USER.no, executor_name:USER.name };
+}
+function opt(list, sel){
+  return '<option value=""></option>'+(list||[]).map(function(v){
+    return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+v+'</option>';
+  }).join('');
+}
+
+function renderForm(editing){
+  if(!editing){
+    FORM=newForm();
+    var saved=restoreDraft();
+    if(saved){ Object.assign(FORM, saved); }
+  }
+  var v=document.getElementById('view');
+  var execField = USER.role==='admin'
+    ? '<div class="field"><label>المنفّذة <span class="req">*</span></label><select id="f_exec">'+execOptions()+'</select></div>'
+    : '';
+  v.innerHTML =
+  '<div class="card">'+
+    '<h2>'+(FORM.id?'تعديل فعالية':'تسجيل فعالية / مبادرة')+'</h2>'+
+    '<p class="sub">سجّل الفعالية لحظة تنفيذها مع صورها وبياناتها. الحقول المعلّمة (<span style="color:var(--err)">*</span>) إلزامية.</p>'+
+    '<div class="grid">'+
+      '<div class="field"><label>نوع الفعالية <span class="req">*</span></label>'+
+        '<select id="f_type" onchange="onTypeChange()">'+opt(CONFIG.activity_type,FORM.type)+'</select></div>'+
+      '<div class="field '+(FORM.type==='يوم عالمي'?'':'hidden')+'" id="worldDayWrap">'+
+        '<label>اسم اليوم العالمي <span class="req">*</span></label>'+
+        '<input type="text" id="f_world" value="'+esc(FORM.world_day)+'" placeholder="مثال: اليوم العالمي لغسل اليدين"></div>'+
+      execField+
+      '<div class="field '+(USER.role==='admin'?'':'full')+'"><label>عنوان الفعالية <span class="req">*</span></label>'+
+        '<input type="text" id="f_title" value="'+esc(FORM.title)+'"></div>'+
+      '<div class="field full"><label>الهدف <span class="req">*</span></label>'+
+        '<textarea id="f_obj">'+esc(FORM.objective)+'</textarea></div>'+
+      '<div class="field"><label>تاريخ التنفيذ <span class="req">*</span></label>'+
+        '<input type="date" id="f_date" value="'+esc(FORM.event_date)+'"></div>'+
+      '<div class="field"><label>المكان</label>'+
+        '<input type="text" id="f_loc" value="'+esc(FORM.location)+'" placeholder="المركز / اسم المدرسة…"></div>'+
+      '<div class="field"><label>آلية التنفيذ</label>'+
+        '<select id="f_mech">'+opt(CONFIG.mechanism,FORM.mechanism)+'</select></div>'+
+      '<div class="field"><label>عدد المستفيدين</label>'+
+        '<input type="number" id="f_ben" min="0" value="'+esc(FORM.beneficiaries)+'"></div>'+
+    '</div>'+
+    '<div class="section-divider"></div>'+
+    '<div class="field full"><label>الفئة المستهدفة</label>'+
+      '<div class="chips" id="chips">'+ chipsHtml() +'</div></div>'+
+    '<div class="section-divider"></div>'+
+    '<div class="toggle-row"><label class="switch"><input type="checkbox" id="f_part" '+
+      (FORM.has_partnership?'checked':'')+' onchange="onPartToggle()"><span class="slider"></span></label>'+
+      '<label style="margin:0">هل توجد شراكة مع جهات أخرى؟</label></div>'+
+    '<div id="partWrap" class="'+(FORM.has_partnership?'':'hidden')+'" style="margin-top:12px">'+
+      '<div class="add-row"><input type="text" id="partInput" placeholder="اسم الجهة المشاركة">'+
+        '<button class="btn btn-ghost btn-sm" onclick="addPartner()">+ إضافة</button></div>'+
+      '<div class="tags" id="partTags">'+partnerTags()+'</div></div>'+
+    '<div class="section-divider"></div>'+
+    '<div class="field full"><label>الصور <span class="req">*</span></label>'+
+      '<div class="hint">تُضغط الصور تلقائيًا قبل الرفع. يمكنك إضافة عدة صور.</div>'+
+      '<input type="file" id="f_photos" accept="image/*" multiple onchange="onPhotos(this)" style="margin-top:8px">'+
+      '<div class="photo-grid" id="photoGrid">'+photoGridHtml()+'</div></div>'+
+    '<div class="section-divider"></div>'+
+    '<div class="field full"><label>ملاحظات</label><textarea id="f_notes">'+esc(FORM.notes)+'</textarea></div>'+
+    '<div class="actions">'+
+      '<button class="btn btn-primary" id="saveBtn" onclick="submitForm()">'+(FORM.id?'حفظ التعديلات':'حفظ الفعالية')+'</button>'+
+      '<button class="btn btn-ghost" onclick="resetForm()">تفريغ النموذج</button>'+
+    '</div>'+
+    '<div class="hint" id="autosaveNote" style="margin-top:10px"></div>'+
+  '</div>';
+  if(USER.role==='admin' && FORM.executor_no){
+    var es=document.getElementById('f_exec'); if(es) es.value=FORM.executor_no;
+  }
+  attachAutosave();
+}
+
+function execOptions(){
+  var staff=[
+    {no:'67204',name:'آمنة عبدالهادي مرزوق'},
+    {no:'57609',name:'عائشة سعيد بخيت السليمي المهري'},
+    {no:'65886',name:'عبدالباقي عبدالهادي مرزوق بيت مرواس'}
+  ];
+  return '<option value=""></option>'+staff.map(function(s){
+    return '<option value="'+s.no+'" '+(FORM.executor_no===s.no?'selected':'')+'>'+s.name+' ('+s.no+')</option>';
+  }).join('');
+}
+function chipsHtml(){
+  return CONFIG.target_group.map(function(g){
+    var on=FORM.target_groups.indexOf(g)>-1;
+    return '<span class="chip'+(on?' on':'')+'" onclick="toggleChip(\''+esc(g)+'\')">'+g+'</span>';
+  }).join('');
+}
+function toggleChip(g){
+  var i=FORM.target_groups.indexOf(g);
+  if(i>-1) FORM.target_groups.splice(i,1); else FORM.target_groups.push(g);
+  document.getElementById('chips').innerHTML=chipsHtml(); saveDraft();
+}
+function onTypeChange(){
+  FORM.type=document.getElementById('f_type').value;
+  document.getElementById('worldDayWrap').classList.toggle('hidden', FORM.type!=='يوم عالمي'); saveDraft();
+}
+function onPartToggle(){
+  FORM.has_partnership=document.getElementById('f_part').checked;
+  document.getElementById('partWrap').classList.toggle('hidden', !FORM.has_partnership); saveDraft();
+}
+function addPartner(){
+  var inp=document.getElementById('partInput'); var v=inp.value.trim(); if(!v) return;
+  if(FORM.partners.indexOf(v)===-1) FORM.partners.push(v);
+  inp.value=''; document.getElementById('partTags').innerHTML=partnerTags(); saveDraft();
+}
+function rmPartner(i){ FORM.partners.splice(i,1);
+  document.getElementById('partTags').innerHTML=partnerTags(); saveDraft(); }
+function partnerTags(){
+  return FORM.partners.map(function(p,i){
+    return '<span class="tag-item">'+esc(p)+'<span class="x" onclick="rmPartner('+i+')">×</span></span>';
+  }).join('');
+}
+
+/* صور: ضغط ومعاينة */
+function onPhotos(input){
+  var files=Array.prototype.slice.call(input.files);
+  Promise.all(files.map(function(file){
+    return compressImage(file).then(function(data){
+      FORM.photos.push({ name:file.name, mime:'image/jpeg', data:data });
+    });
+  })).then(function(){
+    input.value=''; document.getElementById('photoGrid').innerHTML=photoGridHtml();
+  });
+}
+function compressImage(file){
+  return new Promise(function(res){
+    var img=new Image(), rd=new FileReader();
+    rd.onload=function(e){ img.onload=function(){
+      var max=1600, w=img.width, h=img.height;
+      if(w>max||h>max){ if(w>h){ h=Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
+      var c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      res(c.toDataURL('image/jpeg',0.8).split(',')[1]);
+    }; img.src=e.target.result; };
+    rd.readAsDataURL(file);
+  });
+}
+function photoGridHtml(){
+  var html='';
+  (FORM.existing_photo_ids||[]).forEach(function(id,i){
+    html+='<div class="photo-thumb"><img loading="lazy" src="https://drive.google.com/thumbnail?id='+id+'&sz=w200">'+
+      '<button class="rm" onclick="rmExisting('+i+')">×</button></div>';
+  });
+  (FORM.photos||[]).forEach(function(p,i){
+    html+='<div class="photo-thumb"><img loading="lazy" src="data:image/jpeg;base64,'+p.data+'">'+
+      '<button class="rm" onclick="rmNewPhoto('+i+')">×</button></div>';
+  });
+  return html;
+}
+function rmNewPhoto(i){ FORM.photos.splice(i,1); document.getElementById('photoGrid').innerHTML=photoGridHtml(); }
+function rmExisting(i){ FORM.existing_photo_ids.splice(i,1); document.getElementById('photoGrid').innerHTML=photoGridHtml(); }
+
+/* ====================== autosave (مع debounce) ====================== */
+var _draftT;
+function attachAutosave(){
+  ['f_world','f_title','f_obj','f_date','f_loc','f_ben','f_notes'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.addEventListener('input',saveDraft);
+  });
+  var mech=document.getElementById('f_mech'); if(mech) mech.addEventListener('change',saveDraft);
+}
+function collectForm(){
+  FORM.type=val('f_type'); FORM.world_day=val('f_world'); FORM.title=val('f_title');
+  FORM.objective=val('f_obj'); FORM.event_date=val('f_date'); FORM.location=val('f_loc');
+  FORM.mechanism=val('f_mech'); FORM.beneficiaries=val('f_ben'); FORM.notes=val('f_notes');
+  if(USER.role==='admin'){
+    var es=document.getElementById('f_exec');
+    if(es){ FORM.executor_no=es.value; FORM.executor_name=es.options[es.selectedIndex].text.replace(/\s*\(.+\)$/,''); }
+  }
+}
+function saveDraft(){
+  collectForm(); if(FORM.id) return;
+  clearTimeout(_draftT); _draftT=setTimeout(writeDraft,400);
+}
+function writeDraft(){
+  var d=Object.assign({},FORM); delete d.photos;
+  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+    var n=document.getElementById('autosaveNote'); if(n) n.textContent='حُفظت مسودة تلقائيًا · '+nowTime(); }catch(e){}
+}
+function restoreDraft(){ try{ var s=localStorage.getItem(DRAFT_KEY); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
+
+/* ====================== حفظ (محلي أولًا ثم الخادم) ====================== */
+function submitForm(){
+  collectForm();
+  var miss=[];
+  if(!FORM.type) miss.push('f_type');
+  if(FORM.type==='يوم عالمي' && !FORM.world_day) miss.push('f_world');
+  if(!FORM.title) miss.push('f_title');
+  if(!FORM.objective) miss.push('f_obj');
+  if(!FORM.event_date) miss.push('f_date');
+  if(USER.role==='admin' && !FORM.executor_no) miss.push('f_exec');
+  var noPhotos=(FORM.photos.length+(FORM.existing_photo_ids||[]).length)===0;
+
+  document.querySelectorAll('.invalid').forEach(function(e){e.classList.remove('invalid');});
+  miss.forEach(function(id){ var e=document.getElementById(id); if(e) e.classList.add('invalid'); });
+  if(noPhotos) toast('أضف صورة واحدة على الأقل للفعالية.','err');
+  if(miss.length){ toast('أكمل الحقول الإلزامية المعلّمة.','err'); return; }
+  if(noPhotos) return;
+
+  var payload=Object.assign({},FORM);
+  var btn=document.getElementById('saveBtn');
+  btn.disabled=true; btn.textContent='جارٍ الحفظ…';
+
+  if(Outbox.available){
+    // 1) حفظ محلي فوري  2) محاولة الرفع
+    Outbox.add(payload).then(function(localId){
+      clearDraft(); updatePending();
+      google.script.run
+        .withSuccessHandler(function(r){
+          if(r && r.ok){ Outbox.remove(localId).then(function(){ onSaved('تم حفظ الفعالية بنجاح.'); }); }
+          else { onSavedLocal(); }
+        })
+        .withFailureHandler(function(){ onSavedLocal(); })
+        .saveActivity(payload);
+    }).catch(function(){ directSave(payload,btn); });
+  } else {
+    directSave(payload,btn);
+  }
+}
+function directSave(payload,btn){
+  run('saveActivity',payload).then(function(r){
+    if(r&&r.ok){ clearDraft(); onSaved('تم حفظ الفعالية بنجاح.'); }
+    else { btn.disabled=false; btn.textContent='حفظ الفعالية'; toast((r&&r.msg)||'تعذّر الحفظ.','err'); }
+  }).catch(function(){
+    btn.disabled=false; btn.textContent='حفظ الفعالية';
+    toast('انقطع الاتصال. بياناتك محفوظة كمسودة، أعد المحاولة.','err');
+  });
+}
+function onSaved(msg){ invalidateCaches(); updatePending(); toast(msg,'ok'); show('records'); }
+function onSavedLocal(){ invalidateCaches(); updatePending();
+  toast('حُفظت محليًا وستُرفع تلقائيًا عند توفّر الاتصال.','ok'); show('records'); }
+
+function resetForm(){
+  confirmModal('تفريغ النموذج','سيُمسح ما أدخلته في هذا النموذج. متابعة؟',function(){
+    clearDraft(); FORM=newForm(); renderForm(true); toast('تم تفريغ النموذج.');
+  });
+}
+
+/* ====================== السجل ====================== */
+function renderRecords(){
+  var years=[]; var y=new Date().getFullYear();
+  for(var i=0;i<4;i++) years.push(y-i);
+  var months=['','يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  document.getElementById('view').innerHTML=
+  '<div class="card">'+
+    '<h2>سجل الفعاليات</h2>'+
+    '<p class="sub">'+(USER.role==='admin'?'جميع الفعاليات المسجّلة.':'فعالياتك المسجّلة.')+'</p>'+
+    '<div class="filters">'+
+      '<div class="field"><label>السنة</label><select id="fl_year" onchange="loadRecords(true)">'+
+        '<option value="">الكل</option>'+years.map(function(yy){return '<option value="'+yy+'">'+yy+'</option>';}).join('')+'</select></div>'+
+      '<div class="field"><label>الشهر</label><select id="fl_month" onchange="loadRecords(true)">'+
+        '<option value="">الكل</option>'+months.map(function(m,i){return i?'<option value="'+i+'">'+m+'</option>':'';}).join('')+'</select></div>'+
+      '<div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadRecords(true)">تحديث</button></div>'+
+    '</div>'+
+    '<div id="recList"><div class="loading"><span class="spin"></span> جارٍ التحميل…</div></div>'+
+  '</div>';
+  loadRecords();
+}
+function loadRecords(force){
+  var year=val('fl_year'), month=val('fl_month');
+  var key=(year||'')+'|'+(month||'');
+  if(!force && REC_CACHE[key]){ paintRecords(REC_CACHE[key]); return; }
+  document.getElementById('recList').innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
+  run('getActivities', USER.no, USER.role, year, month).then(function(list){
+    REC_CACHE[key]=list; paintRecords(list);
+  });
+}
+function paintRecords(list){
+  var box=document.getElementById('recList');
+  if(!list.length){ box.innerHTML='<div class="empty">لا توجد فعاليات مسجّلة بعد.</div>'; return; }
+  window._recs={};
+  box.innerHTML=list.map(function(o){
+    window._recs[o.id]=o;
+    var typeLabel=o.type==='يوم عالمي'&&o.world_day?(o.type+' — '+o.world_day):o.type;
+    return '<div class="rec"><div class="meta">'+
+      '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
+      '<div class="row2">'+
+        '<span class="badge">'+esc(typeLabel)+'</span>'+
+        '<span>التاريخ: '+esc(o.event_date)+'</span>'+
+        (USER.role==='admin'?'<span>المنفّذة: '+esc(o.executor_name)+'</span>':'')+
+        (o.beneficiaries?'<span>المستفيدون: '+esc(o.beneficiaries)+'</span>':'')+
+        (o.photo_ids.length?'<span>'+o.photo_ids.length+' صورة</span>':'')+
+        ((o.has_partnership===true||o.has_partnership==='true')?'<span class="badge part">شراكة</span>':'')+
+      '</div></div>'+
+      '<div class="ops">'+
+        '<button class="btn btn-ghost btn-sm" onclick="editActivity(\''+o.id+'\')">تعديل</button>'+
+        '<button class="btn btn-ghost btn-sm" onclick="askDelete(\''+o.id+'\')">حذف</button>'+
+      '</div></div>';
+  }).join('');
+}
+
+function viewActivity(id){
+  var o=window._recs[id]; if(!o) return;
+  var photos=(o.photo_ids||[]).map(function(pid){
+    return '<div class="photo-thumb"><a href="https://drive.google.com/file/d/'+pid+'/view" target="_blank">'+
+      '<img loading="lazy" src="https://drive.google.com/thumbnail?id='+pid+'&sz=w200"></a></div>';
+  }).join('');
+  var body=
+    dl('النوع', o.type==='يوم عالمي'&&o.world_day?(o.type+' — '+o.world_day):o.type)+
+    dl('العنوان', o.title)+ dl('الهدف', o.objective)+ dl('الفئة المستهدفة', o.target_groups)+
+    dl('تاريخ التنفيذ', o.event_date+' · '+o.month_name+' · '+o.quarter)+
+    dl('المكان', o.location)+ dl('آلية التنفيذ', o.mechanism)+
+    dl('عدد المستفيدين', o.beneficiaries)+ dl('المنفّذة', o.executor_name)+
+    ((o.has_partnership===true||o.has_partnership==='true')?dl('الجهات المشاركة', o.partners):'')+
+    (o.notes?dl('ملاحظات', o.notes):'')+
+    (photos?'<div style="margin-top:14px"><label>الصور</label><div class="photo-grid">'+photos+'</div></div>':'');
+  openModal(o.title, body,
+    '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
+    '<button class="btn btn-primary" onclick="closeModal();editActivity(\''+id+'\')">تعديل</button>');
+}
+function editActivity(id){
+  var o=window._recs[id]; if(!o) return;
+  FORM=newForm();
+  FORM.id=o.id; FORM.type=o.type; FORM.world_day=o.world_day; FORM.title=o.title;
+  FORM.objective=o.objective; FORM.event_date=isoDate(o.event_date);
+  FORM.target_groups=o.target_groups?String(o.target_groups).split(' ، '):[];
+  FORM.location=o.location; FORM.mechanism=o.mechanism; FORM.beneficiaries=o.beneficiaries;
+  FORM.has_partnership=(o.has_partnership===true||o.has_partnership==='true');
+  FORM.partners=o.partners?String(o.partners).split(' ، '):[];
+  FORM.existing_photo_ids=(o.photo_ids||[]).slice();
+  FORM.photo_folder_id=o.photo_folder_id; FORM.notes=o.notes;
+  FORM.executor_no=USER.role==='admin'?(o.executor_no||USER.no):USER.no;
+  FORM.executor_name=o.executor_name;
+  setActiveTab('register'); renderForm(true);
+}
+function askDelete(id){
+  var o=window._recs[id];
+  confirmModal('حذف الفعالية','سيُحذف سجل «'+esc(o.title)+'» نهائيًا. هل أنت متأكد؟',function(){
+    run('deleteActivity',id).then(function(r){
+      if(r.ok){ invalidateCaches(); toast('تم الحذف.','ok'); loadRecords(true); }
+      else toast('تعذّر الحذف.','err');
+    });
+  }, true);
+}
+
+/* ====================== لوحة المؤشرات ====================== */
+function renderDashboard(){
+  document.getElementById('view').innerHTML='<div class="card"><div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div></div>';
+  if(DASH_CACHE){ paintDash(DASH_CACHE); return; }
+  run('getDashboard', USER.no, USER.role).then(function(d){ DASH_CACHE=d; paintDash(d); });
+}
+function paintDash(d){
+  document.getElementById('view').innerHTML=
+  '<div class="card">'+
+    '<h2>المؤشرات العامة</h2>'+
+    '<p class="sub">'+(USER.role==='admin'?'ملخّص جميع الفعاليات.':'ملخّص فعالياتك.')+'</p>'+
+    '<div class="kpis">'+
+      kpi(d.total,'إجمالي الفعاليات')+ kpi(d.beneficiaries,'إجمالي المستفيدين')+
+      kpi(d.partnerships,'فعاليات بشراكات')+ kpi(Object.keys(d.byType).length,'أنواع مختلفة')+
+    '</div>'+
+    '<div class="section-divider"></div><label>التوزيع حسب النوع</label>'+ bars(d.byType) +
+    '<div class="section-divider"></div><label>التوزيع حسب الشهر</label>'+ bars(d.byMonth) +
+    (USER.role==='admin'?('<div class="section-divider"></div><label>حسب المنفّذة</label>'+bars(d.byExecutor)):'')+
+  '</div>';
+}
+function kpi(n,l){ return '<div class="kpi"><div class="n">'+(n||0)+'</div><div class="l">'+l+'</div></div>'; }
+function bars(obj){
+  var keys=Object.keys(obj||{}); if(!keys.length) return '<div class="empty">لا بيانات.</div>';
+  var max=Math.max.apply(null,keys.map(function(k){return obj[k];}));
+  return '<div class="bars">'+keys.map(function(k){
+    var pct=max?Math.round(obj[k]/max*100):0;
+    return '<div class="bar-row"><span class="lbl">'+esc(k)+'</span>'+
+      '<span class="bar-track"><span class="bar-fill" style="width:'+pct+'%"></span></span>'+
+      '<span class="v">'+obj[k]+'</span></div>';
+  }).join('')+'</div>';
+}
+
+/* ====================== الإدارة ====================== */
+function renderAdmin(){
+  document.getElementById('view').innerHTML=
+  '<div class="card">'+
+    '<h2>إدارة القوائم</h2>'+
+    '<p class="sub">أي إضافة هنا تنعكس مباشرةً في نماذج التسجيل لكل المستخدمين.</p>'+
+    cfgBlock('أنواع الفعاليات','activity_type')+'<div class="section-divider"></div>'+
+    cfgBlock('الفئات المستهدفة','target_group')+'<div class="section-divider"></div>'+
+    cfgBlock('آليات التنفيذ','mechanism')+
+  '</div>'+
+  '<div class="card"><h2>التصدير</h2>'+
+    '<p class="sub">تصدير منظّم بالصور (PDF) وقالب المديرية (Excel) — يُفعَّل بعد رفع القالب الرسمي والشعار.</p>'+
+    '<button class="btn btn-ghost" onclick="toast(\'سيُفعَّل التصدير بعد رفع القالب الرسمي والشعار.\')">تصدير (قريبًا)</button>'+
+  '</div>';
+}
+function cfgBlock(title,cat){
+  return '<div style="margin-top:6px"><label>'+title+'</label>'+
+    '<div class="tags" id="cfg_'+cat+'">'+cfgTags(cat)+'</div>'+
+    '<div class="add-row" style="margin-top:8px"><input type="text" id="add_'+cat+'" placeholder="إضافة عنصر جديد">'+
+    '<button class="btn btn-ghost btn-sm" onclick="addCfg(\''+cat+'\')">+ إضافة</button></div></div>';
+}
+function cfgTags(cat){
+  return (CONFIG[cat]||[]).map(function(v){
+    return '<span class="tag-item">'+esc(v)+'<span class="x" onclick="rmCfg(\''+cat+'\',\''+esc(v)+'\')">×</span></span>';
+  }).join('');
+}
+function addCfg(cat){
+  var inp=document.getElementById('add_'+cat); var v=inp.value.trim(); if(!v) return;
+  run('addConfigItem',cat,v).then(function(r){
+    if(!r.ok){ toast(r.msg,'err'); return; }
+    CONFIG=r.config; inp.value=''; document.getElementById('cfg_'+cat).innerHTML=cfgTags(cat);
+    toast('أُضيف العنصر.','ok');
+  });
+}
+function rmCfg(cat,v){
+  confirmModal('تعطيل عنصر','سيُخفى «'+esc(v)+'» من النماذج (تبقى السجلات القديمة سليمة). متابعة؟',function(){
+    run('removeConfigItem',cat,v).then(function(r){
+      if(!r.ok){ toast(r.msg,'err'); return; }
+      CONFIG=r.config; document.getElementById('cfg_'+cat).innerHTML=cfgTags(cat);
+      toast('تم التعطيل.','ok');
+    });
+  });
+}
+
+/* ====================== نوافذ منبثقة ====================== */
+function openModal(title, body, foot){
+  document.getElementById('modalHost').innerHTML=
+  '<div class="modal-bg" onclick="if(event.target===this)closeModal()">'+
+    '<div class="modal"><div class="modal-head"><h3>'+esc(title)+'</h3>'+
+      '<button class="x" onclick="closeModal()">×</button></div>'+
+    '<div class="modal-body">'+body+'</div>'+
+    '<div class="modal-foot">'+(foot||'<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>')+'</div>'+
+  '</div></div>';
+}
+function closeModal(){ document.getElementById('modalHost').innerHTML=''; }
+function confirmModal(title,msg,onYes,danger){
+  window._confirmCb=onYes;
+  openModal(title,'<p style="margin:0">'+msg+'</p>',
+    '<button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>'+
+    '<button class="btn '+(danger?'btn-danger':'btn-primary')+'" onclick="closeModal();(window._confirmCb&&window._confirmCb())">تأكيد</button>');
+}
+
+/* ====================== أدوات ====================== */
+function val(id){ var e=document.getElementById(id); return e?e.value:''; }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function dl(k,v){ if(v==null||v==='') return ''; return '<div class="dl-row"><span>'+k+'</span><span>'+esc(v)+'</span></div>'; }
+function nowTime(){ var d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+function isoDate(s){ if(!s) return ''; var p=String(s).split('/'); if(p.length===3) return p[0]+'-'+('0'+p[1]).slice(-2)+'-'+('0'+p[2]).slice(-2); return s; }
+</script>

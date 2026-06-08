@@ -1,0 +1,41 @@
+name: Deploy to Apps Script
+
+# يعمل تلقائيًا عند كل دفع لتغييرات داخل src على فرع main
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'src/**' ]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp
+        run: npm install -g @google/clasp@2.4.2
+
+      - name: Authenticate clasp
+        # المحتوى الكامل لملف ~/.clasprc.json (يُحفظ كسرّ CLASPRC_JSON)
+        run: printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+
+      - name: Push & Deploy
+        env:
+          DID: ${{ secrets.DEPLOYMENT_ID }}
+        run: |
+          clasp push -f
+          if [ -n "$DID" ]; then
+            clasp deploy -i "$DID" -d "GitHub ${GITHUB_SHA:0:7}"
+            echo "✓ نُشر التحديث على نفس الرابط الثابت."
+          else
+            echo "ℹ تم دفع الكود فقط (لم يُضبط سرّ DEPLOYMENT_ID لإعادة النشر)."
+          fi

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+
+  <!-- ===================== شاشة الدخول ===================== -->
+  <div id="loginScreen" class="login-wrap">
+    <div class="login-card">
+      <div class="brand">أثر</div>
+      <div class="org-name">
+        المديرية العامة للخدمات الصحية بمحافظة ظفار<br>
+        التجمّع الصحي (٢) — مركز صحي حاسك
+      </div>
+      <label style="display:block;text-align:right;margin-bottom:6px">الرقم الوظيفي</label>
+      <input id="empNo" type="text" inputmode="numeric" placeholder="••••••" autocomplete="off">
+      <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">دخول</button>
+      <div class="login-err" id="loginErr"></div>
+    </div>
+  </div>
+
+  <!-- ===================== التطبيق ===================== -->
+  <div id="app" class="hidden">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="logo-box">الشعار</div>
+        <div class="org">
+          <h1>المديرية العامة للخدمات الصحية بمحافظة ظفار</h1>
+          <p>التجمّع الصحي (٢) — مركز صحي حاسك · منصة «أثر»</p>
+        </div>
+        <div class="topbar-spacer"></div>
+        <span id="pending" class="pending hidden"></span>
+        <div class="who">
+          <b id="whoName"></b>
+          <span id="whoTitle"></span>
+        </div>
+        <button class="btn-logout" onclick="logout()">خروج</button>
+      </div>
+    </header>
+
+    <div class="cover"><span class="tag">توثيق الفعاليات والمبادرات</span></div>
+
+    <nav class="tabs"><div class="tabs-inner" id="tabsBar"></div></nav>
+
+    <main id="view"></main>
+  </div>
+
+  <div id="modalHost"></div>
+  <div id="toast"></div>
+
+  <?!= include('Offline'); ?>
+  <?!= include('JavaScript'); ?>
+</body>
+</html>
