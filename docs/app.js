@@ -1,4 +1,3 @@
-<script>
 /* ====================== حالة عامة ====================== */
 var USER = null;          // {no,name,role,title}
 var CONFIG = null;        // {activity_type, target_group, mechanism, users?}
@@ -757,4 +756,3 @@ function dl(k,v){ if(v==null||v==='') return ''; return '<div class="dl-row"><sp
 function nowTime(){ var d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
 function isoDate(s){ if(!s) return ''; var p=String(s).split('/'); if(p.length===3) return p[0]+'-'+('0'+p[1]).slice(-2)+'-'+('0'+p[2]).slice(-2); return s; }
 function splitList(s){ return String(s||'').split(/[،,]/).map(function(x){return x.trim();}).filter(Boolean); }
-</script>

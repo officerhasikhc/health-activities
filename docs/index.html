@@ -1,50 +1,73 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>منصة أثر للمبادرات الصحية</title>
-<style>
-body{
-    font-family: Arial, sans-serif;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    height:100vh;
-    margin:0;
-    background:#f5f7fa;
-}
-.card{
-    text-align:center;
-    background:white;
-    padding:40px;
-    border-radius:15px;
-    box-shadow:0 4px 15px rgba(0,0,0,.1);
-}
-h1{
-    color:#0a6;
-}
-a{
-    display:inline-block;
-    margin-top:20px;
-    padding:12px 24px;
-    background:#0a6;
-    color:white;
-    text-decoration:none;
-    border-radius:8px;
-}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="theme-color" content="#1a4d5c">
+  <title>منصة أثر للمبادرات الصحية</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/logo-login.png">
+  <link rel="apple-touch-icon" href="assets/logo-login.png">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-<div class="card">
-    <h1>منصة أثر للمبادرات الصحية</h1>
-    <p>مرحباً بك</p>
+  <div id="loginScreen" class="login-wrap">
+    <div class="login-card">
+      <img class="login-logo" src="assets/logo-login.png" alt="شعار وزارة الصحة">
+      <div class="brand">منصة أثر</div>
+      <div class="brand-sub">للمبادرات الصحية</div>
+      <div class="org-name">
+        المديرية العامة للخدمات الصحية بمحافظة ظفار<br>
+        التجمّع الصحي (٢) — مركز صحي حاسك
+      </div>
+      <label style="display:block;text-align:right;margin-bottom:6px">الرقم الوظيفي</label>
+      <input id="empNo" type="text" inputmode="numeric" placeholder="••••••" autocomplete="off">
+      <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">دخول</button>
+      <button class="btn btn-ghost install-btn" onclick="installApp()">تثبيت التطبيق</button>
+      <div class="login-err" id="loginErr"></div>
+    </div>
+  </div>
 
-    <a href="https://script.google.com/macros/s/AKfycbzIYwD05Oy9DKc0dWKOJKNCxChaIr3q2dSd-OBZpkmrTah2FBHIBu02VBvrcX9C3V7_yg/exec">
-        دخول إلى المنصة
-    </a>
-</div>
+  <div id="app" class="hidden">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="logo-box">
+          <img src="assets/logo.png" alt="شعار وزارة الصحة">
+        </div>
+        <div class="org">
+          <h1>المديرية العامة للخدمات الصحية بمحافظة ظفار</h1>
+          <p>التجمّع الصحي (٢) — مركز صحي حاسك</p>
+        </div>
+        <div class="app-title"><span>منصة أثر</span><strong>للمبادرات الصحية</strong></div>
+        <div class="topbar-spacer"></div>
+        <span id="pending" class="pending hidden"></span>
+        <div class="who">
+          <b id="whoName"></b>
+          <span id="whoTitle"></span>
+        </div>
+        <button class="btn-logout" onclick="logout()">خروج</button>
+      </div>
+    </header>
 
+    <div class="cover"><span class="tag">توثيق الفعاليات والمبادرات</span></div>
+    <nav class="tabs"><div class="tabs-inner" id="tabsBar"></div></nav>
+    <main id="view"></main>
+  </div>
+
+  <div id="modalHost"></div>
+  <div id="toast"></div>
+
+  <script>
+    window.ATHAR_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycbxUg1TtF9Nmr7G_r6m0QznyPAvc2XXNTjJisNOFUTPhFZ2wbyDxrk-s5gx4e7L3w9N9wQ/exec?bridge=1';
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function(){
+        navigator.serviceWorker.register('./sw.js').catch(function(){});
+      });
+    }
+  </script>
+  <script src="server-bridge.js"></script>
+  <script src="offline.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

@@ -1,5 +1,4 @@
-<style>
-  :root{
+:root{
     --bg:#f4f5f7; --surface:#ffffff; --ink:#1d2733; --muted:#5b6b7b;
     --line:#dfe4ea; --line-strong:#c7d0d9;
     --brand:#1a4d5c;          /* أخضر مزرقّ رسمي هادئ */
@@ -253,4 +252,3 @@
     .mini-rec{grid-template-columns:1fr}
     .validation-panel{left:12px;right:12px;top:auto;bottom:76px;width:auto}
   }
-</style>

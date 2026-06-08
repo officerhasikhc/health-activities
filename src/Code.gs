@@ -35,9 +35,74 @@ var OFFICIAL_LETTER_NAME = 'officiallyletter.jpg';
 var REPORT_ROOT_NAME = 'أثر - تقارير PDF';
 var APP_LOGO_NAME = 'logo.png';
 var LOGIN_LOGO_NAME = 'logo-login.png';
+var OFFICIAL_APP_URL = 'https://officerhasikhc.github.io/health-activities/';
+var GITHUB_ORIGIN = 'https://officerhasikhc.github.io';
+var REQUIRED_FIELD_CATEGORY = 'required_field';
+var REQUIRED_LOCKED_FIELDS = ['type','title','event_date','executor_no'];
+var REQUIRED_FIELD_DEFAULTS = {
+  objective: true,
+  target_groups: false,
+  mechanism: false,
+  beneficiaries: false,
+  location: false,
+  photos: true,
+  world_day: false,
+  partners: false,
+  notes: false
+};
+var REQUIRED_FIELD_LABELS = {
+  type: 'نوع الفعالية',
+  title: 'عنوان الفعالية',
+  event_date: 'تاريخ التنفيذ',
+  executor_no: 'المنفّذة',
+  objective: 'الهدف',
+  target_groups: 'الفئة المستهدفة',
+  mechanism: 'آلية التنفيذ',
+  beneficiaries: 'عدد المستفيدين',
+  location: 'المكان',
+  photos: 'الصور',
+  world_day: 'اسم اليوم العالمي',
+  partners: 'الجهات الشريكة',
+  notes: 'ملاحظات'
+};
 
 // ============================ نقطة الدخول ============================
-function doGet() {
+function doGet(e) {
+  e = e || {};
+  if (e.parameter && e.parameter.bridge === '1') {
+    var b = HtmlService.createTemplateFromFile('Bridge');
+    b.ALLOWED_ORIGIN = GITHUB_ORIGIN;
+    return b
+      .evaluate()
+      .setTitle(APP_NAME + ' - Bridge')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+  return officialAppPage_();
+}
+
+function officialAppPage_() {
+  var logo = getAssetDataUri_(LOGIN_LOGO_NAME);
+  var html = '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>' + APP_NAME + '</title><style>' +
+    'body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#123a46,#1a4d5c 58%,#315b62);font-family:Segoe UI,Tahoma,Arial,sans-serif;color:#1d2733;text-align:center;padding:18px;box-sizing:border-box}' +
+    '.card{background:#fff;border-top:4px solid #9a7b3f;border-radius:10px;box-shadow:0 14px 50px rgba(0,0,0,.28);max-width:420px;width:100%;padding:30px}' +
+    'img{width:112px;height:112px;object-fit:contain}.brand{font-size:27px;font-weight:700;color:#1a4d5c}.sub{color:#9a7b3f;font-weight:600;margin-top:2px}.org{color:#5b6b7b;font-size:13px;line-height:1.8;margin:12px 0 22px}' +
+    'a{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:42px;background:#1a4d5c;color:#fff;text-decoration:none;border-radius:6px;font-weight:700}' +
+    '.hint{font-size:12px;color:#5b6b7b;margin-top:14px;line-height:1.7}</style></head><body><main class="card">' +
+    (logo ? '<img src="' + logo + '" alt="شعار وزارة الصحة">' : '') +
+    '<div class="brand">منصة أثر</div><div class="sub">للمبادرات الصحية</div>' +
+    '<div class="org">المديرية العامة للخدمات الصحية بمحافظة ظفار<br>التجمّع الصحي (٢) — مركز صحي حاسك</div>' +
+    '<a href="' + OFFICIAL_APP_URL + '" target="_top">فتح الرابط الرسمي</a>' +
+    '<div class="hint">هذا الرابط يعمل كخادم خلفي فقط. الرابط الرسمي للمستخدمين هو GitHub Pages.</div>' +
+    '</main></body></html>';
+  return HtmlService.createHtmlOutput(html)
+    .setTitle(APP_NAME)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function legacyDoGet_() {
   var t = HtmlService.createTemplateFromFile('Index');
   t.APP_LOGO_URI = getAssetDataUri_(APP_LOGO_NAME);
   t.LOGIN_LOGO_URI = getAssetDataUri_(LOGIN_LOGO_NAME);
@@ -100,6 +165,9 @@ function setup() {
     types.forEach(function(v,i){ seed.push(['activity_type', v, true, i+1]); });
     groups.forEach(function(v,i){ seed.push(['target_group', v, true, i+1]); });
     mechs.forEach(function(v,i){ seed.push(['mechanism', v, true, i+1]); });
+    Object.keys(REQUIRED_FIELD_DEFAULTS).forEach(function(k,i){
+      seed.push([REQUIRED_FIELD_CATEGORY, k, REQUIRED_FIELD_DEFAULTS[k], i+1]);
+    });
     cfg.getRange(2,1,seed.length,4).setValues(seed);
   }
 
@@ -294,22 +362,60 @@ function getActiveUsersForAdmin_() {
 // ============================ القوائم (Config) ============================
 function getConfig() {
   var cached = CACHE.get('cfg');
-  if (cached) return JSON.parse(cached);
+  if (cached) {
+    var parsed = JSON.parse(cached);
+    if (parsed.required_fields) return parsed;
+  }
   var sh = ss_().getSheetByName(SHEETS.CONFIG);
   var data = sh.getDataRange().getValues();
   data.shift();
   var out = { activity_type: [], target_group: [], mechanism: [] };
+  var required = defaultRequiredFields_();
   data.forEach(function(r){
-    if (!r[0] || r[2] === false) return;
-    if (!out[r[0]]) out[r[0]] = [];
-    out[r[0]].push({ value: r[1], order: r[3] || 0 });
+    var category = String(r[0] || '');
+    if (!category) return;
+    if (category === REQUIRED_FIELD_CATEGORY) {
+      var field = String(r[1] || '');
+      if (Object.prototype.hasOwnProperty.call(required, field)) required[field] = isActive_(r[2]);
+      return;
+    }
+    if (r[2] === false) return;
+    if (!out[category]) out[category] = [];
+    out[category].push({ value: r[1], order: r[3] || 0 });
   });
   Object.keys(out).forEach(function(k){
-    out[k].sort(function(a,b){ return a.order - b.order; });
-    out[k] = out[k].map(function(x){ return x.value; });
+    if (Array.isArray(out[k])) {
+      out[k].sort(function(a,b){ return a.order - b.order; });
+      out[k] = out[k].map(function(x){ return x.value; });
+    }
   });
+  out.required_fields = required;
+  out.required_meta = requiredFieldMeta_(required);
   CACHE.put('cfg', JSON.stringify(out), 21600);
   return out;
+}
+
+function defaultRequiredFields_() {
+  var out = {};
+  Object.keys(REQUIRED_FIELD_DEFAULTS).forEach(function(k){ out[k] = !!REQUIRED_FIELD_DEFAULTS[k]; });
+  return out;
+}
+
+function requiredFieldMeta_(required) {
+  var keys = REQUIRED_LOCKED_FIELDS.concat(Object.keys(REQUIRED_FIELD_DEFAULTS));
+  return keys.map(function(k){
+    return {
+      key: k,
+      label: REQUIRED_FIELD_LABELS[k] || k,
+      locked: REQUIRED_LOCKED_FIELDS.indexOf(k) > -1,
+      required: REQUIRED_LOCKED_FIELDS.indexOf(k) > -1 ? true : !!required[k]
+    };
+  });
+}
+
+function getRequiredFields_() {
+  var cfg = getConfig();
+  return cfg.required_fields || defaultRequiredFields_();
 }
 
 // إدارة فقط: إضافة عنصر لقائمة وينعكس في كل الصفحات
@@ -346,6 +452,37 @@ function removeConfigItem(category, value, actorEmpNo) {
     }
   }
   return { ok:false, msg:'لم يُعثر على العنصر.' };
+}
+
+function setRequiredField(field, required, actorEmpNo) {
+  requireAdmin_(actorEmpNo);
+  field = String(field || '').trim();
+  if (REQUIRED_LOCKED_FIELDS.indexOf(field) > -1) {
+    return { ok:false, msg:'هذا الحقل أساسي ولا يمكن جعله اختياريا.' };
+  }
+  if (!Object.prototype.hasOwnProperty.call(REQUIRED_FIELD_DEFAULTS, field)) {
+    return { ok:false, msg:'الحقل غير معروف.' };
+  }
+
+  var sh = ss_().getSheetByName(SHEETS.CONFIG);
+  var data = sh.getDataRange().getValues();
+  for (var i=1;i<data.length;i++){
+    if (String(data[i][0]) === REQUIRED_FIELD_CATEGORY && String(data[i][1]) === field) {
+      sh.getRange(i+1,3).setValue(!!required);
+      CACHE.remove('cfg');
+      var updated = getConfig();
+      updated.users = getActiveUsersForAdmin_();
+      return { ok:true, config:updated };
+    }
+  }
+
+  var max = 0;
+  data.forEach(function(r){ if (String(r[0]) === REQUIRED_FIELD_CATEGORY && r[3] > max) max = r[3]; });
+  sh.appendRow([REQUIRED_FIELD_CATEGORY, field, !!required, max + 1]);
+  CACHE.remove('cfg');
+  var config = getConfig();
+  config.users = getActiveUsersForAdmin_();
+  return { ok:true, config:config };
 }
 
 // ============================ الفعاليات ============================
@@ -393,16 +530,14 @@ function saveActivity(payload, actorEmpNo) {
   payload = payload || {};
   var actor = requireActiveUser_(actorEmpNo || payload.created_by_no || payload.executor_no);
   var isAdmin = actor.role === 'admin';
-  // التحقق من الحقول الإلزامية في الخادم أيضًا
-  var required = ['type','title','objective','event_date','executor_no'];
-  for (var i=0;i<required.length;i++){
-    if (!payload[required[i]]) return { ok:false, msg:'حقول إلزامية ناقصة.' };
+  if (!isAdmin) {
+    payload.executor_no = actor.emp_no;
+    payload.executor_name = actor.name;
   }
+  var missing = missingRequiredFields_(payload);
+  if (missing.length) return { ok:false, msg:'حقول إلزامية ناقصة: ' + missing.join('، ') };
   if (String(payload.type) === OTHER_VALUE && !String(payload.type_custom || '').trim()) {
     return { ok:false, msg:'اكتب نوع الفعالية عند اختيار أخرى.' };
-  }
-  if (String(payload.type) === 'يوم عالمي' && !String(payload.world_day || '').trim()) {
-    return { ok:false, msg:'اكتب اسم اليوم العالمي.' };
   }
 
   var sh = activitiesSheet_();
@@ -488,6 +623,33 @@ function saveActivity(payload, actorEmpNo) {
     else { sh.getRange(rowIndex, 1, 1, values.length).setValues([values]); }
   }
   return { ok:true, id:id };
+}
+
+function missingRequiredFields_(payload) {
+  var required = getRequiredFields_();
+  var missing = [];
+  function add(key) { missing.push(REQUIRED_FIELD_LABELS[key] || key); }
+  function hasText(v) { return String(v == null ? '' : v).trim() !== ''; }
+
+  if (!hasText(payload.type)) add('type');
+  if (!hasText(payload.title)) add('title');
+  if (!hasText(payload.event_date)) add('event_date');
+  if (!hasText(payload.executor_no)) add('executor_no');
+  if (String(payload.type) === OTHER_VALUE && !hasText(payload.type_custom)) missing.push('نوع آخر');
+
+  if (required.objective && !hasText(payload.objective)) add('objective');
+  if (required.target_groups && !normalizeList_(payload.target_groups).length) add('target_groups');
+  if (required.mechanism && !normalizeList_(payload.mechanisms || payload.mechanism).length) add('mechanism');
+  if (required.beneficiaries && !hasText(payload.beneficiaries)) add('beneficiaries');
+  if (required.location && !hasText(payload.location)) add('location');
+  if (required.world_day && String(payload.type) === 'يوم عالمي' && !hasText(payload.world_day)) add('world_day');
+  if (required.partners && payload.has_partnership && !normalizeList_(payload.partners).length) add('partners');
+  if (required.notes && !hasText(payload.notes)) add('notes');
+
+  var hasPhotos = (payload.photos && payload.photos.length) ||
+    (payload.existing_photo_ids && payload.existing_photo_ids.length);
+  if (required.photos && !hasPhotos) add('photos');
+  return missing;
 }
 
 function findRowById_(sh, id) {

@@ -10,14 +10,16 @@
 
 | الطبقة | الأداة |
 |---|---|
-| التشغيل | Google Apps Script (Web App) |
+| الرابط الرسمي | GitHub Pages (`docs/`) |
+| الخادم الخلفي | Google Apps Script (Web App مخفي عبر Bridge) |
 | الواجهة | HTML/CSS/JS عربي RTL (تصميم رسمي) |
 | قاعدة البيانات | Google Sheets |
 | تخزين الصور | Google Drive |
 | الإصدارات | Git + GitHub |
 | الجسر/النشر | clasp + GitHub Actions |
 
-> تطبيق Apps Script يُستضاف على خوادم جوجل. GitHub لإدارة الكود والإصدارات فقط، وclasp يزامن المجلد المحلي مع المشروع على جوجل.
+> الرابط الرسمي للمستخدمين هو GitHub Pages: https://officerhasikhc.github.io/health-activities  
+> Apps Script يبقى خادمًا خلفيًا مخفيًا للبيانات والصور وPDF، وclasp يزامن `src/` مع مشروع جوجل.
 
 ## بنية المجلدات
 
@@ -31,7 +33,7 @@ athar/
 │  ├─ JavaScript.html    ← منطق الواجهة (نماذج، سجل، مؤشرات، إدارة)
 │  └─ Offline.html       ← الحفظ المحلي أولًا ثم المزامنة (IndexedDB)
 ├─ assets/logo/          ← ضع الشعار هنا (لا يُرفع إلى Apps Script)
-├─ docs/                 ← ARCHITECTURE.md و ROADMAP.md
+├─ docs/                 ← واجهة GitHub Pages + ARCHITECTURE.md و ROADMAP.md
 ├─ .github/workflows/    ← النشر التلقائي
 ├─ .clasp.json           ← يحوي scriptId و rootDir
 ├─ package.json

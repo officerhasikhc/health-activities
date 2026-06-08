@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+</head>
+<body>
+<script>
+var ALLOWED_ORIGIN = '<?!= ALLOWED_ORIGIN ?>';
+var ALLOWED_METHODS = {
+  init: true,
+  saveActivity: true,
+  getActivities: true,
+  deleteActivity: true,
+  exportActivityPdf: true,
+  getDashboard: true,
+  getDashboardItems: true,
+  addConfigItem: true,
+  removeConfigItem: true,
+  setRequiredField: true
+};
+
+function reply(payload) {
+  payload.source = 'athar-bridge';
+  window.top.postMessage(payload, ALLOWED_ORIGIN);
+}
+
+window.addEventListener('message', function(event) {
+  if (event.origin !== ALLOWED_ORIGIN) return;
+  var msg = event.data || {};
+  if (msg.source !== 'athar' || !msg.id) return;
+  if (!ALLOWED_METHODS[msg.fn]) {
+    reply({ id: msg.id, ok: false, error: 'العملية غير مسموحة.' });
+    return;
+  }
+  try {
+    google.script.run
+      .withSuccessHandler(function(data) {
+        reply({ id: msg.id, ok: true, data: data });
+      })
+      .withFailureHandler(function(err) {
+        reply({ id: msg.id, ok: false, error: (err && err.message) ? err.message : String(err || 'تعذّر الاتصال.') });
+      })[msg.fn].apply(null, msg.args || []);
+  } catch (err) {
+    reply({ id: msg.id, ok: false, error: (err && err.message) ? err.message : String(err) });
+  }
+});
+
+reply({ ready: true });
+setInterval(function(){ reply({ ready: true, ping: Date.now() }); }, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "منصة أثر للمبادرات الصحية",
+  "short_name": "أثر",
+  "description": "توثيق الفعاليات والمبادرات الصحية لمركز صحي حاسك.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#f4f5f7",
+  "theme_color": "#1a4d5c",
+  "icons": [
+    {
+      "src": "assets/logo-login.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
