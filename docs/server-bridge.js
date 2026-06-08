@@ -6,7 +6,7 @@
   var ready = false;
   var seq = 1;
   var pending = {};
-  var queue = [];
+  var readyWaiters = [];
 
   function trustedOrigin(origin){
     return origin === 'https://script.google.com' ||
@@ -17,24 +17,67 @@
   function ensureFrame(){
     if (bridgeFrame || !bridgeUrl) return;
     bridgeFrame = document.createElement('iframe');
-    bridgeFrame.src = bridgeUrl;
+    bridgeFrame.src = withCacheBust(bridgeUrl);
     bridgeFrame.title = 'Athar server bridge';
     bridgeFrame.setAttribute('aria-hidden', 'true');
-    bridgeFrame.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;left:-9999px;top:-9999px';
+    bridgeFrame.loading = 'eager';
+    bridgeFrame.style.cssText = 'position:fixed;width:1px;height:1px;opacity:.01;pointer-events:none;border:0;right:0;bottom:0;clip-path:inset(50%);';
     document.body.appendChild(bridgeFrame);
   }
 
-  function flush(){
-    while (ready && bridgeWindow && queue.length) post(queue.shift());
+  function withCacheBust(url){
+    return url + (url.indexOf('?') > -1 ? '&' : '?') + 't=' + Date.now();
   }
 
-  function post(message){
-    if (!ready || !bridgeWindow) {
-      queue.push(message);
+  function markReady(){
+    ready = true;
+    var waiters = readyWaiters.slice();
+    readyWaiters = [];
+    waiters.forEach(function(w){
+      clearTimeout(w.timer);
+      w.resolve();
+    });
+  }
+
+  function reloadBridge(){
+    ready = false;
+    bridgeWindow = null;
+    bridgeOrigin = null;
+    if (!bridgeFrame) {
       ensureFrame();
       return;
     }
-    bridgeWindow.postMessage(message, bridgeOrigin || '*');
+    bridgeFrame.src = 'about:blank';
+    setTimeout(function(){ bridgeFrame.src = withCacheBust(bridgeUrl); }, 80);
+  }
+
+  function waitReady(timeoutMs){
+    ensureFrame();
+    if (ready && bridgeWindow) return Promise.resolve();
+    return new Promise(function(resolve, reject){
+      var waiter = {
+        resolve: resolve,
+        reject: reject,
+        timer: setTimeout(function(){
+          readyWaiters = readyWaiters.filter(function(w){ return w !== waiter; });
+          reject(new Error('تعذّر تجهيز الاتصال. أعد تحميل الصفحة، أو افتح الرابط من متصفح Chrome/Safari مباشرة.'));
+        }, timeoutMs)
+      };
+      readyWaiters.push(waiter);
+    });
+  }
+
+  function callBridge(fn, args){
+    var id = 'req_' + (seq++);
+    return new Promise(function(resolve, reject){
+      pending[id] = { resolve: resolve, reject: reject };
+      bridgeWindow.postMessage({ source: 'athar', id: id, fn: fn, args: args || [] }, bridgeOrigin || '*');
+      setTimeout(function(){
+        if (!pending[id]) return;
+        delete pending[id];
+        reject(new Error('انتهت مهلة الاتصال بالخادم. تحقق من الاتصال ثم أعد المحاولة.'));
+      }, 90000);
+    });
   }
 
   window.addEventListener('message', function(event){
@@ -44,8 +87,7 @@
     bridgeWindow = event.source;
     bridgeOrigin = event.origin;
     if (msg.ready) {
-      ready = true;
-      flush();
+      markReady();
       return;
     }
     if (!msg.id || !pending[msg.id]) return;
@@ -57,17 +99,16 @@
 
   window.AtharServer = {
     run: function(fn, args){
-      ensureFrame();
-      var id = 'req_' + (seq++);
-      return new Promise(function(resolve, reject){
-        pending[id] = { resolve: resolve, reject: reject };
-        post({ source: 'athar', id: id, fn: fn, args: args || [] });
-        setTimeout(function(){
-          if (!pending[id]) return;
-          delete pending[id];
-          reject(new Error('انتهت مهلة الاتصال بالخادم.'));
-        }, 90000);
+      return waitReady(12000).catch(function(){
+        reloadBridge();
+        return waitReady(18000);
+      }).then(function(){
+        return callBridge(fn, args);
       });
+    },
+    reload: reloadBridge,
+    isReady: function(){
+      return ready && !!bridgeWindow;
     }
   };
 

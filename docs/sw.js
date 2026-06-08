@@ -1,4 +1,4 @@
-var CACHE_NAME = 'athar-shell-v1';
+var CACHE_NAME = 'athar-shell-v2';
 var SHELL = [
   './',
   './index.html',
@@ -8,7 +8,8 @@ var SHELL = [
   './app.js',
   './manifest.webmanifest',
   './assets/logo.png',
-  './assets/logo-login.png'
+  './assets/logo-login.png',
+  './assets/social-preview.png'
 ];
 
 self.addEventListener('install', function(event){

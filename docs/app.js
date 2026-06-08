@@ -6,6 +6,12 @@ var DRAFT_KEY = 'athar_draft';
 var REC_CACHE = {};       // ذاكرة مؤقتة للسجل حسب (سنة|شهر)
 var DASH_CACHE = null;    // ذاكرة مؤقتة للمؤشرات
 var deferredInstallPrompt = null;
+var REMEMBER_KEY = 'athar_remember_emp';
+var SAVED_EMP_KEY = 'athar_saved_emp';
+var SESSION_MSG_KEY = 'athar_session_msg';
+var IDLE_LIMIT_MS = 10 * 60 * 1000;
+var idleTimer = null;
+var idleEvents = ['click','keydown','touchstart','mousemove','scroll','input'];
 
 function invalidateCaches(){ REC_CACHE = {}; DASH_CACHE = null; }
 
@@ -41,10 +47,12 @@ function doLogin(){
     btn.disabled=false; btn.textContent='دخول';
     if(!r.ok){ err.textContent=r.msg; return; }
     USER=r.user; CONFIG=r.config;
+    saveRememberedEmp(no);
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     document.getElementById('whoName').textContent=USER.name;
     document.getElementById('whoTitle').textContent=USER.title;
+    startSessionGuard();
     boot();
   }).catch(function(e){
     btn.disabled=false; btn.textContent='دخول';
@@ -54,7 +62,58 @@ function doLogin(){
 document.addEventListener('keydown',function(e){
   if(e.key==='Enter' && !document.getElementById('loginScreen').classList.contains('hidden')) doLogin();
 });
-function logout(){ USER=null; location.reload(); }
+function logout(){
+  confirmModal('تأكيد الخروج','هل تريد تسجيل الخروج من منصة أثر؟',function(){
+    forceLogout('');
+  });
+}
+function forceLogout(message){
+  stopSessionGuard();
+  USER=null; CONFIG=null; FORM=null;
+  if(message) sessionStorage.setItem(SESSION_MSG_KEY, message);
+  location.reload();
+}
+function initLoginPrefs(){
+  var emp=document.getElementById('empNo');
+  var remember=document.getElementById('rememberEmp');
+  var err=document.getElementById('loginErr');
+  if(!emp || !remember) return;
+  var shouldRemember=localStorage.getItem(REMEMBER_KEY)==='1';
+  remember.checked=shouldRemember;
+  if(shouldRemember) emp.value=localStorage.getItem(SAVED_EMP_KEY)||'';
+  var msg=sessionStorage.getItem(SESSION_MSG_KEY);
+  if(msg && err){ err.textContent=msg; sessionStorage.removeItem(SESSION_MSG_KEY); }
+}
+function saveRememberedEmp(no){
+  var remember=document.getElementById('rememberEmp');
+  if(remember && remember.checked){
+    localStorage.setItem(REMEMBER_KEY,'1');
+    localStorage.setItem(SAVED_EMP_KEY,no);
+  } else {
+    localStorage.removeItem(REMEMBER_KEY);
+    localStorage.removeItem(SAVED_EMP_KEY);
+  }
+}
+function startSessionGuard(){
+  stopSessionGuard();
+  idleEvents.forEach(function(ev){ window.addEventListener(ev,onSessionActivity,{passive:true}); });
+  resetIdleTimer();
+}
+function stopSessionGuard(){
+  clearTimeout(idleTimer);
+  idleEvents.forEach(function(ev){ window.removeEventListener(ev,onSessionActivity); });
+}
+function onSessionActivity(){
+  if(USER) resetIdleTimer();
+}
+function resetIdleTimer(){
+  clearTimeout(idleTimer);
+  idleTimer=setTimeout(function(){
+    forceLogout('انتهت الجلسة بسبب عدم التفاعل لمدة 10 دقائق. سجّل الدخول مرة أخرى.');
+  }, IDLE_LIMIT_MS);
+}
+document.addEventListener('DOMContentLoaded', initLoginPrefs);
+if(document.readyState!=='loading') initLoginPrefs();
 
 window.addEventListener('beforeinstallprompt', function(e){
   e.preventDefault();

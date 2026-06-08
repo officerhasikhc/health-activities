@@ -233,6 +233,9 @@
   .login-card .org-name{font-size:12.5px;color:var(--muted);margin:10px 0 22px;line-height:1.7}
   .login-card input{text-align:center;font-size:16px;letter-spacing:2px;padding:11px}
   .login-card .btn{width:100%;margin-top:14px;padding:11px}
+  .remember-row{display:flex;align-items:center;gap:8px;justify-content:flex-start;
+    margin:10px 0 0;color:var(--muted);font-size:12.5px;font-weight:500}
+  .remember-row input{width:16px;height:16px;accent-color:var(--brand)}
   .install-btn{margin-top:8px !important}
   .login-err{color:var(--err);font-size:12.5px;margin-top:10px;min-height:16px}
 
