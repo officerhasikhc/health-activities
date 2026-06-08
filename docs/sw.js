@@ -1,8 +1,9 @@
-var CACHE_NAME = 'athar-shell-v3';
+var CACHE_NAME = 'athar-shell-v4';
 var SHELL = [
   './',
   './index.html',
   './styles.css',
+  './debug.js',
   './server-bridge.js',
   './offline.js',
   './app.js',

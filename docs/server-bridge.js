@@ -4,6 +4,7 @@
    لذلك يبقى iframe + google.script.run هو المسار المستقر.
    ============================================================ */
 (function(){
+  function log(){ if (window.AtharLog) window.AtharLog.apply(null, ['bridge'].concat([].slice.call(arguments))); }
   var bridgeUrl = window.ATHAR_BRIDGE_URL;
   var bridgeFrame = null;
   var bridgeWindow = null;
@@ -24,17 +25,22 @@
   }
 
   function ensureFrame(){
-    if (bridgeFrame || !bridgeUrl) return;
+    if (bridgeFrame || !bridgeUrl) { if(!bridgeUrl) log('لا يوجد ATHAR_BRIDGE_URL'); return; }
+    var src = withCacheBust(bridgeUrl);
+    log('إنشاء iframe ->', src);
     bridgeFrame = document.createElement('iframe');
-    bridgeFrame.src = withCacheBust(bridgeUrl);
+    bridgeFrame.src = src;
     bridgeFrame.title = 'Athar server bridge';
     bridgeFrame.setAttribute('aria-hidden', 'true');
     bridgeFrame.loading = 'eager';
+    bridgeFrame.onload = function(){ log('iframe onload (تم تحميل صفحة الجسر)'); };
+    bridgeFrame.onerror = function(){ log('iframe onerror (فشل تحميل صفحة الجسر)'); };
     bridgeFrame.style.cssText = 'position:fixed;width:1px;height:1px;opacity:.01;pointer-events:none;border:0;right:0;bottom:0;clip-path:inset(50%);';
     document.body.appendChild(bridgeFrame);
   }
 
   function markReady(){
+    log('وصلت إشارة ready من الجسر');
     ready = true;
     var waiters = readyWaiters.slice();
     readyWaiters = [];
@@ -65,6 +71,7 @@
         reject: reject,
         timer: setTimeout(function(){
           readyWaiters = readyWaiters.filter(function(w){ return w !== waiter; });
+          log('انتهت مهلة الانتظار (' + timeoutMs + 'ms) دون ready — الجسر لم يستجب');
           reject(new Error('تعذّر تجهيز الاتصال. أعد تحميل الصفحة، أو افتح الرابط من متصفح Chrome/Safari مباشرة.'));
         }, timeoutMs)
       };
@@ -88,7 +95,8 @@
   window.addEventListener('message', function(event){
     var msg = event.data || {};
     if (msg.source !== 'athar-bridge') return;
-    if (!trustedOrigin(event.origin)) return;
+    if (!trustedOrigin(event.origin)) { log('رُفضت رسالة من أصل غير موثوق:', event.origin); return; }
+    log('رسالة من الجسر:', event.origin, msg.ready ? 'ready' : ('id=' + msg.id + ' ok=' + msg.ok));
     bridgeWindow = event.source;
     bridgeOrigin = event.origin;
     if (msg.ready) {
@@ -104,11 +112,16 @@
 
   window.AtharServer = {
     run: function(fn, args){
+      log('طلب:', fn, 'ready=' + ready);
       return waitReady(12000).catch(function(){
+        log('إعادة تحميل الجسر بعد فشل أول انتظار');
         reloadBridge();
         return waitReady(18000);
       }).then(function(){
         return callBridge(fn, args);
+      }).catch(function(err){
+        log('فشل الطلب:', fn, '->', err && err.message);
+        throw err;
       });
     },
     reload: reloadBridge,
