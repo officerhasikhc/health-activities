@@ -24,12 +24,62 @@
     return String(a);
   }
 
+  var lastAction = '-';
   function push(level, tag, args) {
-    var line = '[' + nowStr() + '] [' + level + ']' + (tag ? ' (' + tag + ')' : '') + ' ' +
-      Array.prototype.map.call(args, stringifyArg).join(' ');
+    var text = Array.prototype.map.call(args, stringifyArg).join(' ');
+    var line = '[' + nowStr() + '] [' + level + ']' + (tag ? ' (' + tag + ')' : '') + ' ' + text;
     buf.push(line);
     if (buf.length > MAX) buf.shift();
+    if (tag === 'bridge' && /^(fetch ->|طلب)/.test(text)) lastAction = text;
     refreshPanel();
+    maybeReport(level, tag, text);
+  }
+
+  /* ---------------- إرسال الأخطاء للمالك بالبريد (يعمل دائمًا) ---------------- */
+  var reporting = false;          // حماية من التكرار اللانهائي
+  var recentSig = {};             // منع تكرار نفس الخطأ
+  var sentThisMinute = 0, minuteStamp = 0;
+
+  function currentUser() {
+    try { return (window.USER && window.USER.no) ? (window.USER.no + ' / ' + (window.USER.name || '')) : 'زائر'; }
+    catch (e) { return 'غير معروف'; }
+  }
+
+  function maybeReport(level, tag, text) {
+    if (reporting) return;
+    var isError = level === 'ERROR' || level === 'PROMISE';
+    var isBridgeFail = tag === 'bridge' && /فشل|انتهت مهلة/.test(text);
+    if (!isError && !isBridgeFail) return;
+    sendReport(level, text);
+  }
+
+  function sendReport(level, message) {
+    var now = Date.now();
+    if (now - minuteStamp > 60000) { minuteStamp = now; sentThisMinute = 0; }
+    if (sentThisMinute >= 8) return;            // سقف عميل: 8 رسائل/دقيقة
+    var sig = level + '|' + message.slice(0, 120);
+    if (recentSig[sig] && now - recentSig[sig] < 60000) return;  // منع التكرار 60ث
+    recentSig[sig] = now;
+    sentThisMinute++;
+
+    var report = {
+      level: level,
+      message: message.slice(0, 300),
+      action: lastAction,
+      user: currentUser(),
+      ua: navigator.userAgent,
+      url: location.href,
+      ts: new Date().toISOString(),
+      logs: buf.slice(-40).join('\n')
+    };
+    reporting = true;
+    try {
+      if (window.AtharServer && window.AtharServer.run) {
+        window.AtharServer.run('logClientError', [report])
+          .catch(function () { /* تجاهل فشل الإرسال */ })
+          .then(function(){ reporting = false; });
+      } else { reporting = false; }
+    } catch (e) { reporting = false; }
   }
 
   // واجهة عامة للتسجيل من بقية الملفات
@@ -112,24 +162,41 @@
     flashT = setTimeout(function () { f.style.opacity = '0'; }, 1800);
   }
 
+  var sizeMode = 'normal'; // 'normal' | 'max'
+  function applySize() {
+    if (!panel) return;
+    if (sizeMode === 'max') panel.style.cssText = panelBase + 'inset:8px 8px 8px 8px;max-height:none;';
+    else panel.style.cssText = panelBase + 'inset:auto 8px 84px 8px;max-height:50vh;';
+    panel.style.display = 'flex';
+  }
+  var panelBase = 'position:fixed;z-index:2147483647;flex-direction:column;background:#0e1c22;color:#cfe0e3;border:1px solid #2a4750;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:monospace;font-size:11px;direction:ltr;';
+
+  function openPanel() { applySize(); refreshPanel(); }
+  function closePanel() { if (panel) panel.style.display = 'none'; }
+
   function buildPanel() {
     var btn = document.createElement('button');
     btn.textContent = '🐞';
     btn.title = 'سجل التشخيص';
     btn.style.cssText = 'position:fixed;z-index:2147483646;bottom:14px;left:14px;width:46px;height:46px;border-radius:50%;border:0;background:#1a4d5c;color:#fff;font-size:20px;box-shadow:0 4px 14px rgba(0,0,0,.3)';
-    btn.onclick = function () { panel.style.display = (panel.style.display === 'none' ? 'flex' : 'none'); refreshPanel(); };
+    btn.onclick = function () { if (panel.style.display === 'none') openPanel(); else closePanel(); };
     document.body.appendChild(btn);
 
     panel = document.createElement('div');
-    panel.style.cssText = 'display:none;position:fixed;z-index:2147483647;inset:auto 8px 70px 8px;max-height:55vh;flex-direction:column;background:#0e1c22;color:#cfe0e3;border:1px solid #2a4750;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.5);font-family:monospace;font-size:11px;direction:ltr';
-    panel.innerHTML =
-      '<div style="display:flex;gap:6px;padding:8px;border-bottom:1px solid #2a4750;align-items:center">' +
-        '<b style="color:#fff;font-family:sans-serif">سجل أثر</b>' +
-        '<span id="athar-dbg-flash" style="margin-inline-start:auto;color:#7fd1a0;font-family:sans-serif;opacity:0;transition:.2s"></span>' +
-      '</div>';
+    panel.style.cssText = panelBase + 'display:none;inset:auto 8px 84px 8px;max-height:50vh;';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'display:flex;gap:6px;padding:8px;border-bottom:1px solid #2a4750;align-items:center';
+    head.innerHTML =
+      '<b style="color:#fff;font-family:sans-serif">سجل أثر</b>' +
+      '<span id="athar-dbg-flash" style="margin-inline-start:auto;color:#7fd1a0;font-family:sans-serif;opacity:0;transition:.2s"></span>';
+    head.appendChild(mkIcon('⤢', 'تكبير/تصغير', function () { sizeMode = (sizeMode === 'max' ? 'normal' : 'max'); applySize(); }));
+    head.appendChild(mkIcon('—', 'تصغير', closePanel));
+    panel.appendChild(head);
+
     logArea = document.createElement('textarea');
     logArea.readOnly = true;
-    logArea.style.cssText = 'flex:1;min-height:30vh;width:100%;box-sizing:border-box;background:#0e1c22;color:#cfe0e3;border:0;padding:8px;resize:none;outline:none';
+    logArea.style.cssText = 'flex:1;min-height:26vh;width:100%;box-sizing:border-box;background:#0e1c22;color:#cfe0e3;border:0;padding:8px;resize:none;outline:none';
     panel.appendChild(logArea);
 
     var bar = document.createElement('div');
@@ -140,6 +207,13 @@
     bar.appendChild(mkBtn('Eruda', function () { window.eruda && eruda.show(); }));
     panel.appendChild(bar);
     document.body.appendChild(panel);
+  }
+
+  function mkIcon(label, title, fn) {
+    var b = document.createElement('button');
+    b.textContent = label; b.title = title; b.onclick = fn;
+    b.style.cssText = 'width:30px;height:30px;border:0;border-radius:6px;background:#234a55;color:#fff;font-size:15px;line-height:1;margin-inline-start:4px';
+    return b;
   }
 
   function mkBtn(label, fn) {
@@ -158,19 +232,22 @@
     document.head.appendChild(s);
   }
 
-  function logTaps() {
+  // تتبّع النقرات يعمل دائمًا لتحديد آخر إجراء في تقرير الخطأ
+  function trackTaps() {
     document.addEventListener('pointerup', function (e) {
       var t = e.target.closest('button,a,[onclick]');
       if (!t) return;
-      push('TAP', '', [(t.tagName || '') + (t.id ? '#' + t.id : '') + ' "' + (t.textContent || '').trim().slice(0, 24) + '"']);
+      var label = (t.tagName || '') + (t.id ? '#' + t.id : '') + ' "' + (t.textContent || '').trim().slice(0, 24) + '"';
+      lastAction = label;
+      if (DEBUG_ON) push('TAP', '', [label]);
     }, true);
   }
 
   function start() {
     envSnapshot();
+    trackTaps();
     if (!DEBUG_ON) return;
     buildPanel();
-    logTaps();
     loadEruda();
     push('DBG', 'init', ['وضع التشخيص مُفعّل']);
   }

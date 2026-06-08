@@ -92,8 +92,64 @@ var API_METHODS = {
   getDashboardItems: true,
   addConfigItem: true,
   removeConfigItem: true,
-  setRequiredField: true
+  setRequiredField: true,
+  logClientError: true
 };
+
+// بريد المالك الذي تصله تقارير الأخطاء (افتراضيًا مالك السكربت)
+function ownerEmail_() {
+  var saved = PROP.getProperty('OWNER_EMAIL');
+  if (saved) return saved;
+  try { return Session.getEffectiveUser().getEmail(); } catch (e) { return ''; }
+}
+
+/**
+ * يستقبل تقرير خطأ من الواجهة (الهاتف/المتصفح) ويرسله بريدًا للمالك.
+ * مع تحديد معدّل الإرسال ومنع التكرار لتفادي إغراق البريد.
+ */
+function logClientError(report) {
+  try {
+    report = report || {};
+    var email = ownerEmail_();
+    if (!email) return { ok: false, error: 'no owner email' };
+
+    // منع التكرار: نفس التوقيع خلال 10 دقائق
+    var sig = String(report.message || '') + '|' + String(report.action || '') + '|' + String(report.user || '');
+    var sigKey = 'errsig_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, sig));
+    if (CACHE.get(sigKey)) return { ok: true, deduped: true };
+    CACHE.put(sigKey, '1', 600);
+
+    // سقف الإرسال: 30 رسالة في الساعة
+    var cntKey = 'errcount';
+    var cnt = parseInt(CACHE.get(cntKey) || '0', 10);
+    if (cnt >= 30) return { ok: true, throttled: true };
+    CACHE.put(cntKey, String(cnt + 1), 3600);
+
+    var subject = '[أثر] خطأ: ' + String(report.message || 'غير محدد').slice(0, 90);
+    var lines = [
+      'تقرير خطأ من تطبيق أثر',
+      '──────────────────────',
+      'الوقت: ' + (report.ts || new Date().toISOString()),
+      'المستخدم: ' + (report.user || 'غير معروف'),
+      'الإجراء: ' + (report.action || '-'),
+      'المستوى: ' + (report.level || '-'),
+      'الرسالة: ' + (report.message || '-'),
+      'الموضع: ' + (report.source || '-'),
+      'الرابط: ' + (report.url || '-'),
+      'الجهاز: ' + (report.ua || '-'),
+      '',
+      'Stack:',
+      String(report.stack || '-'),
+      '',
+      'آخر السجلات:',
+      String(report.logs || '-')
+    ];
+    MailApp.sendEmail({ to: email, subject: subject, body: lines.join('\n') });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) ? e.message : String(e) };
+  }
+}
 
 /**
  * نقطة اتصال JSON مباشرة (بديل الجسر/الـ iframe).

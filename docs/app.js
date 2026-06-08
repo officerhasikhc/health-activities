@@ -9,6 +9,8 @@ var deferredInstallPrompt = null;
 var REMEMBER_KEY = 'athar_remember_emp';
 var SAVED_EMP_KEY = 'athar_saved_emp';
 var SESSION_MSG_KEY = 'athar_session_msg';
+var SESSION_KEY = 'athar_session';
+var _lastSessionTouch = 0;
 var IDLE_LIMIT_MS = 10 * 60 * 1000;
 var idleTimer = null;
 var idleEvents = ['click','keydown','touchstart','mousemove','scroll','input'];
@@ -48,11 +50,8 @@ function doLogin(){
     if(!r.ok){ err.textContent=r.msg; return; }
     USER=r.user; CONFIG=r.config;
     saveRememberedEmp(no);
-    document.getElementById('loginScreen').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
-    document.getElementById('whoName').textContent=USER.name;
-    document.getElementById('whoTitle').textContent=USER.title;
-    startSessionGuard();
+    persistSession(no);
+    enterApp();
     boot();
   }).catch(function(e){
     btn.disabled=false; btn.textContent='دخول';
@@ -70,8 +69,53 @@ function logout(){
 function forceLogout(message){
   stopSessionGuard();
   USER=null; CONFIG=null; FORM=null;
+  clearSession();
   if(message) sessionStorage.setItem(SESSION_MSG_KEY, message);
   location.reload();
+}
+
+/* ====================== استمرارية الجلسة عبر التحديث ====================== */
+function persistSession(no){
+  try{
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      no: no || (USER && USER.no), user: USER, config: CONFIG, ts: Date.now()
+    }));
+    _lastSessionTouch = Date.now();
+  }catch(e){}
+}
+function touchSession(){
+  if(!USER) return;
+  var now = Date.now();
+  if(now - _lastSessionTouch < 20000) return; // تقليل عدد الكتابات
+  persistSession(USER.no);
+}
+function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
+function enterApp(){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('whoName').textContent=USER.name;
+  document.getElementById('whoTitle').textContent=USER.title;
+  startSessionGuard();
+}
+function restoreSession(){
+  var raw;
+  try{ raw = localStorage.getItem(SESSION_KEY); }catch(e){ return false; }
+  if(!raw) return false;
+  var s;
+  try{ s = JSON.parse(raw); }catch(e){ clearSession(); return false; }
+  if(!s || !s.user || !s.config){ clearSession(); return false; }
+  if(Date.now() - (s.ts||0) > IDLE_LIMIT_MS){ clearSession(); return false; }
+  USER = s.user; CONFIG = s.config;
+  enterApp();
+  boot();
+  // تحديث القوائم/الصلاحيات في الخلفية دون مقاطعة المستخدم
+  if(s.no){
+    run('init', s.no).then(function(r){
+      if(r && r.ok){ USER=r.user; CONFIG=r.config; persistSession(s.no); }
+      else { forceLogout('انتهت الجلسة. سجّل الدخول من جديد.'); }
+    }).catch(function(){});
+  }
+  return true;
 }
 function initLoginPrefs(){
   var emp=document.getElementById('empNo');
@@ -108,12 +152,17 @@ function onSessionActivity(){
 }
 function resetIdleTimer(){
   clearTimeout(idleTimer);
+  touchSession();
   idleTimer=setTimeout(function(){
     forceLogout('انتهت الجلسة بسبب عدم التفاعل لمدة 10 دقائق. سجّل الدخول مرة أخرى.');
   }, IDLE_LIMIT_MS);
 }
-document.addEventListener('DOMContentLoaded', initLoginPrefs);
-if(document.readyState!=='loading') initLoginPrefs();
+function bootstrapAuth(){
+  initLoginPrefs();
+  restoreSession();
+}
+document.addEventListener('DOMContentLoaded', bootstrapAuth);
+if(document.readyState!=='loading') bootstrapAuth();
 
 window.addEventListener('beforeinstallprompt', function(e){
   e.preventDefault();
@@ -443,6 +492,8 @@ function submitForm(){
 
   var payload=Object.assign({},FORM);
   payload._actor_no=USER.no;
+  var isEdit=!!FORM.id;
+  var okMsg=isEdit?'تم حفظ التعديل بنجاح.':'تم حفظ الفعالية بنجاح.';
   var btn=document.getElementById('saveBtn');
   btn.disabled=true; btn.textContent='جارٍ الحفظ…';
 
@@ -451,12 +502,12 @@ function submitForm(){
     Outbox.add(payload).then(function(localId){
       clearDraft(); updatePending();
       run('saveActivity', payload, USER.no).then(function(r){
-        if(r && r.ok){ Outbox.remove(localId).then(function(){ onSaved('تم حفظ الفعالية بنجاح.'); }); }
+        if(r && r.ok){ Outbox.remove(localId).then(function(){ onSaved(okMsg); }); }
         else { onSavedLocal(); }
       }).catch(function(){ onSavedLocal(); });
-    }).catch(function(){ directSave(payload,btn); });
+    }).catch(function(){ directSave(payload,btn,okMsg); });
   } else {
-    directSave(payload,btn);
+    directSave(payload,btn,okMsg);
   }
 }
 function missingFormFields(){
@@ -504,12 +555,13 @@ function showValidationErrors(miss){
   }
   toast('حقول ناقصة: '+miss.map(function(m){ return m.label; }).join('، '),'err');
 }
-function directSave(payload,btn){
+function directSave(payload,btn,okMsg){
+  var fallbackLabel=(payload && payload.id)?'حفظ التعديلات':'حفظ الفعالية';
   run('saveActivity',payload,USER.no).then(function(r){
-    if(r&&r.ok){ clearDraft(); onSaved('تم حفظ الفعالية بنجاح.'); }
-    else { btn.disabled=false; btn.textContent='حفظ الفعالية'; toast((r&&r.msg)||'تعذّر الحفظ.','err'); }
+    if(r&&r.ok){ clearDraft(); onSaved(okMsg||'تم الحفظ بنجاح.'); }
+    else { btn.disabled=false; btn.textContent=fallbackLabel; toast((r&&r.msg)||'تعذّر الحفظ.','err'); }
   }).catch(function(){
-    btn.disabled=false; btn.textContent='حفظ الفعالية';
+    btn.disabled=false; btn.textContent=fallbackLabel;
     toast('انقطع الاتصال. بياناتك محفوظة كمسودة، أعد المحاولة.','err');
   });
 }
@@ -550,6 +602,9 @@ function loadRecords(force){
   document.getElementById('recList').innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
   run('getActivities', USER.no, year, month).then(function(list){
     REC_CACHE[key]=list; paintRecords(list);
+  }).catch(function(e){
+    var box=document.getElementById('recList');
+    if(box) box.innerHTML='<div class="empty">تعذّر تحميل السجل: '+esc((e&&e.message)||'خطأ غير معروف')+'<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadRecords(true)">إعادة المحاولة</button></div>';
   });
 }
 function paintRecords(list){
@@ -654,9 +709,16 @@ function exportPdf(id){
 function renderDashboard(){
   document.getElementById('view').innerHTML='<div class="card"><div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div></div>';
   if(DASH_CACHE){ paintDash(DASH_CACHE); return; }
-  run('getDashboard', USER.no).then(function(d){ DASH_CACHE=d; paintDash(d); });
+  run('getDashboard', USER.no).then(function(d){ DASH_CACHE=d; paintDash(d); }).catch(function(e){
+    var v=document.getElementById('view');
+    if(v) v.innerHTML='<div class="card"><div class="empty">تعذّر تحميل المؤشرات: '+esc((e&&e.message)||'خطأ غير معروف')+'<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="renderDashboard()">إعادة المحاولة</button></div></div>';
+  });
 }
 function paintDash(d){
+  d = d || {};
+  d.byType = d.byType || {}; d.byMechanism = d.byMechanism || {};
+  d.byMonth = d.byMonth || {}; d.byHalf = d.byHalf || {};
+  d.byQuarter = d.byQuarter || {}; d.byExecutor = d.byExecutor || {};
   document.getElementById('view').innerHTML=
   '<div class="card">'+
     '<h2>المؤشرات العامة</h2>'+
