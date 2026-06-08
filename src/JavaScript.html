@@ -1,7 +1,7 @@
 <script>
 /* ====================== حالة عامة ====================== */
 var USER = null;          // {no,name,role,title}
-var CONFIG = null;        // {activity_type, target_group, mechanism}
+var CONFIG = null;        // {activity_type, target_group, mechanism, users?}
 var FORM = null;
 var DRAFT_KEY = 'athar_draft';
 var REC_CACHE = {};       // ذاكرة مؤقتة للسجل حسب (سنة|شهر)
@@ -87,8 +87,8 @@ function show(tab){
 
 /* ====================== نموذج التسجيل ====================== */
 function newForm(){
-  return { id:null, type:'', world_day:'', title:'', objective:'',
-    target_groups:[], event_date:'', location:'', mechanism:'',
+  return { id:null, type:'', type_custom:'', world_day:'', title:'', objective:'',
+    target_groups:[], event_date:'', location:'', mechanism:'', mechanisms:[],
     beneficiaries:'', has_partnership:false, partners:[],
     photos:[], existing_photo_ids:[], photo_folder_id:'', notes:'',
     executor_no:USER.no, executor_name:USER.name };
@@ -98,6 +98,19 @@ function opt(list, sel){
     return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+v+'</option>';
   }).join('');
 }
+function typeOptions(){
+  var list=(CONFIG.activity_type||[]).slice();
+  if(list.indexOf('أخرى')<0) list.push('أخرى');
+  return opt(list, FORM.type);
+}
+function ensureFormShape(){
+  FORM.target_groups=FORM.target_groups||[];
+  FORM.partners=FORM.partners||[];
+  FORM.photos=FORM.photos||[];
+  FORM.existing_photo_ids=FORM.existing_photo_ids||[];
+  FORM.mechanisms=FORM.mechanisms&&FORM.mechanisms.length ? FORM.mechanisms : splitList(FORM.mechanism);
+  if(FORM.type==='أخرى') FORM.type_custom=FORM.type_custom||'';
+}
 
 function renderForm(editing){
   if(!editing){
@@ -105,22 +118,26 @@ function renderForm(editing){
     var saved=restoreDraft();
     if(saved){ Object.assign(FORM, saved); }
   }
+  ensureFormShape();
   var v=document.getElementById('view');
   var execField = USER.role==='admin'
     ? '<div class="field"><label>المنفّذة <span class="req">*</span></label><select id="f_exec">'+execOptions()+'</select></div>'
-    : '';
+    : '<div class="field"><label>المنفّذة</label><div class="readonly-box">'+esc(USER.name)+'<small>'+esc(USER.title||'')+'</small></div></div>';
   v.innerHTML =
   '<div class="card">'+
     '<h2>'+(FORM.id?'تعديل فعالية':'تسجيل فعالية / مبادرة')+'</h2>'+
     '<p class="sub">سجّل الفعالية لحظة تنفيذها مع صورها وبياناتها. الحقول المعلّمة (<span style="color:var(--err)">*</span>) إلزامية.</p>'+
     '<div class="grid">'+
       '<div class="field"><label>نوع الفعالية <span class="req">*</span></label>'+
-        '<select id="f_type" onchange="onTypeChange()">'+opt(CONFIG.activity_type,FORM.type)+'</select></div>'+
+        '<select id="f_type" onchange="onTypeChange()">'+typeOptions()+'</select></div>'+
+      '<div class="field '+(FORM.type==='أخرى'?'':'hidden')+'" id="typeOtherWrap">'+
+        '<label>نوع آخر <span class="req">*</span></label>'+
+        '<input type="text" id="f_type_custom" value="'+esc(FORM.type_custom)+'" placeholder="اكتب نوع الفعالية"></div>'+
       '<div class="field '+(FORM.type==='يوم عالمي'?'':'hidden')+'" id="worldDayWrap">'+
         '<label>اسم اليوم العالمي <span class="req">*</span></label>'+
         '<input type="text" id="f_world" value="'+esc(FORM.world_day)+'" placeholder="مثال: اليوم العالمي لغسل اليدين"></div>'+
       execField+
-      '<div class="field '+(USER.role==='admin'?'':'full')+'"><label>عنوان الفعالية <span class="req">*</span></label>'+
+      '<div class="field"><label>عنوان الفعالية <span class="req">*</span></label>'+
         '<input type="text" id="f_title" value="'+esc(FORM.title)+'"></div>'+
       '<div class="field full"><label>الهدف <span class="req">*</span></label>'+
         '<textarea id="f_obj">'+esc(FORM.objective)+'</textarea></div>'+
@@ -128,11 +145,16 @@ function renderForm(editing){
         '<input type="date" id="f_date" value="'+esc(FORM.event_date)+'"></div>'+
       '<div class="field"><label>المكان</label>'+
         '<input type="text" id="f_loc" value="'+esc(FORM.location)+'" placeholder="المركز / اسم المدرسة…"></div>'+
-      '<div class="field"><label>آلية التنفيذ</label>'+
-        '<select id="f_mech">'+opt(CONFIG.mechanism,FORM.mechanism)+'</select></div>'+
       '<div class="field"><label>عدد المستفيدين</label>'+
         '<input type="number" id="f_ben" min="0" value="'+esc(FORM.beneficiaries)+'"></div>'+
     '</div>'+
+    '<div class="section-divider"></div>'+
+    '<div class="field full"><label>آلية التنفيذ</label>'+
+      '<div class="hint">يمكن اختيار أكثر من آلية وإضافة آلية غير موجودة.</div>'+
+      '<div class="chips soft" id="mechChoices">'+mechanismChoicesHtml()+'</div>'+
+      '<div class="tags" id="mechTags">'+mechanismTags()+'</div>'+
+      '<div class="add-row" style="margin-top:8px"><input type="text" id="mechInput" placeholder="إضافة آلية تنفيذ أخرى">'+
+        '<button class="btn btn-ghost btn-sm" onclick="addMechanismFree()">+ إضافة</button></div></div>'+
     '<div class="section-divider"></div>'+
     '<div class="field full"><label>الفئة المستهدفة</label>'+
       '<div class="chips" id="chips">'+ chipsHtml() +'</div></div>'+
@@ -164,11 +186,7 @@ function renderForm(editing){
 }
 
 function execOptions(){
-  var staff=[
-    {no:'67204',name:'آمنة عبدالهادي مرزوق'},
-    {no:'57609',name:'عائشة سعيد بخيت السليمي المهري'},
-    {no:'65886',name:'عبدالباقي عبدالهادي مرزوق بيت مرواس'}
-  ];
+  var staff=CONFIG.users||[];
   return '<option value=""></option>'+staff.map(function(s){
     return '<option value="'+s.no+'" '+(FORM.executor_no===s.no?'selected':'')+'>'+s.name+' ('+s.no+')</option>';
   }).join('');
@@ -186,7 +204,36 @@ function toggleChip(g){
 }
 function onTypeChange(){
   FORM.type=document.getElementById('f_type').value;
-  document.getElementById('worldDayWrap').classList.toggle('hidden', FORM.type!=='يوم عالمي'); saveDraft();
+  document.getElementById('worldDayWrap').classList.toggle('hidden', FORM.type!=='يوم عالمي');
+  document.getElementById('typeOtherWrap').classList.toggle('hidden', FORM.type!=='أخرى');
+  if(FORM.type!=='أخرى') FORM.type_custom='';
+  saveDraft();
+}
+function mechanismChoicesHtml(){
+  return (CONFIG.mechanism||[]).map(function(m){
+    var on=FORM.mechanisms.indexOf(m)>-1;
+    return '<span class="chip'+(on?' on muted':'')+'" onclick="toggleMechanism(\''+esc(m)+'\')">'+esc(m)+'</span>';
+  }).join('');
+}
+function toggleMechanism(m){
+  var i=FORM.mechanisms.indexOf(m);
+  if(i>-1) FORM.mechanisms.splice(i,1); else FORM.mechanisms.push(m);
+  refreshMechanisms(); saveDraft();
+}
+function addMechanismFree(){
+  var inp=document.getElementById('mechInput'); var v=inp.value.trim(); if(!v) return;
+  if(FORM.mechanisms.indexOf(v)===-1) FORM.mechanisms.push(v);
+  inp.value=''; refreshMechanisms(); saveDraft();
+}
+function rmMechanism(i){ FORM.mechanisms.splice(i,1); refreshMechanisms(); saveDraft(); }
+function refreshMechanisms(){
+  document.getElementById('mechChoices').innerHTML=mechanismChoicesHtml();
+  document.getElementById('mechTags').innerHTML=mechanismTags();
+}
+function mechanismTags(){
+  return (FORM.mechanisms||[]).map(function(m,i){
+    return '<span class="tag-item">'+esc(m)+'<span class="x" onclick="rmMechanism('+i+')">×</span></span>';
+  }).join('');
 }
 function onPartToggle(){
   FORM.has_partnership=document.getElementById('f_part').checked;
@@ -247,37 +294,49 @@ function rmExisting(i){ FORM.existing_photo_ids.splice(i,1); document.getElement
 /* ====================== autosave (مع debounce) ====================== */
 var _draftT;
 function attachAutosave(){
-  ['f_world','f_title','f_obj','f_date','f_loc','f_ben','f_notes'].forEach(function(id){
+  ['f_type_custom','f_world','f_title','f_obj','f_date','f_loc','f_ben','f_notes'].forEach(function(id){
     var el=document.getElementById(id); if(el) el.addEventListener('input',saveDraft);
   });
-  var mech=document.getElementById('f_mech'); if(mech) mech.addEventListener('change',saveDraft);
 }
 function collectForm(){
-  FORM.type=val('f_type'); FORM.world_day=val('f_world'); FORM.title=val('f_title');
+  FORM.type=val('f_type'); FORM.type_custom=FORM.type==='أخرى'?val('f_type_custom'):'';
+  FORM.world_day=val('f_world'); FORM.title=val('f_title');
   FORM.objective=val('f_obj'); FORM.event_date=val('f_date'); FORM.location=val('f_loc');
-  FORM.mechanism=val('f_mech'); FORM.beneficiaries=val('f_ben'); FORM.notes=val('f_notes');
+  FORM.mechanisms=FORM.mechanisms||[];
+  FORM.mechanism=FORM.mechanisms.join(' ، ');
+  FORM.beneficiaries=val('f_ben'); FORM.notes=val('f_notes');
   if(USER.role==='admin'){
     var es=document.getElementById('f_exec');
     if(es){ FORM.executor_no=es.value; FORM.executor_name=es.options[es.selectedIndex].text.replace(/\s*\(.+\)$/,''); }
+  } else {
+    FORM.executor_no=USER.no; FORM.executor_name=USER.name;
   }
 }
 function saveDraft(){
   collectForm(); if(FORM.id) return;
   clearTimeout(_draftT); _draftT=setTimeout(writeDraft,400);
 }
+function draftKey(){ return DRAFT_KEY + '_' + (USER ? USER.no : 'guest'); }
 function writeDraft(){
   var d=Object.assign({},FORM); delete d.photos;
-  try{ localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+  try{ localStorage.setItem(draftKey(), JSON.stringify(d));
     var n=document.getElementById('autosaveNote'); if(n) n.textContent='حُفظت مسودة تلقائيًا · '+nowTime(); }catch(e){}
 }
-function restoreDraft(){ try{ var s=localStorage.getItem(DRAFT_KEY); return s?JSON.parse(s):null; }catch(e){ return null; } }
-function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
+function restoreDraft(){
+  try{
+    localStorage.removeItem(DRAFT_KEY); // مفتاح قديم قبل فصل المسودات حسب المستخدم
+    var s=localStorage.getItem(draftKey());
+    return s?JSON.parse(s):null;
+  }catch(e){ return null; }
+}
+function clearDraft(){ try{ localStorage.removeItem(draftKey()); localStorage.removeItem(DRAFT_KEY); }catch(e){} }
 
 /* ====================== حفظ (محلي أولًا ثم الخادم) ====================== */
 function submitForm(){
   collectForm();
   var miss=[];
   if(!FORM.type) miss.push('f_type');
+  if(FORM.type==='أخرى' && !FORM.type_custom) miss.push('f_type_custom');
   if(FORM.type==='يوم عالمي' && !FORM.world_day) miss.push('f_world');
   if(!FORM.title) miss.push('f_title');
   if(!FORM.objective) miss.push('f_obj');
@@ -292,6 +351,7 @@ function submitForm(){
   if(noPhotos) return;
 
   var payload=Object.assign({},FORM);
+  payload._actor_no=USER.no;
   var btn=document.getElementById('saveBtn');
   btn.disabled=true; btn.textContent='جارٍ الحفظ…';
 
@@ -305,14 +365,14 @@ function submitForm(){
           else { onSavedLocal(); }
         })
         .withFailureHandler(function(){ onSavedLocal(); })
-        .saveActivity(payload);
+        .saveActivity(payload, USER.no);
     }).catch(function(){ directSave(payload,btn); });
   } else {
     directSave(payload,btn);
   }
 }
 function directSave(payload,btn){
-  run('saveActivity',payload).then(function(r){
+  run('saveActivity',payload,USER.no).then(function(r){
     if(r&&r.ok){ clearDraft(); onSaved('تم حفظ الفعالية بنجاح.'); }
     else { btn.disabled=false; btn.textContent='حفظ الفعالية'; toast((r&&r.msg)||'تعذّر الحفظ.','err'); }
   }).catch(function(){
@@ -355,7 +415,7 @@ function loadRecords(force){
   var key=(year||'')+'|'+(month||'');
   if(!force && REC_CACHE[key]){ paintRecords(REC_CACHE[key]); return; }
   document.getElementById('recList').innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
-  run('getActivities', USER.no, USER.role, year, month).then(function(list){
+  run('getActivities', USER.no, year, month).then(function(list){
     REC_CACHE[key]=list; paintRecords(list);
   });
 }
@@ -365,7 +425,7 @@ function paintRecords(list){
   window._recs={};
   box.innerHTML=list.map(function(o){
     window._recs[o.id]=o;
-    var typeLabel=o.type==='يوم عالمي'&&o.world_day?(o.type+' — '+o.world_day):o.type;
+    var typeLabel=o.type==='يوم عالمي'&&o.world_day?((o.display_type||o.type)+' — '+o.world_day):(o.display_type||o.type);
     return '<div class="rec"><div class="meta">'+
       '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
       '<div class="row2">'+
@@ -377,6 +437,7 @@ function paintRecords(list){
         ((o.has_partnership===true||o.has_partnership==='true')?'<span class="badge part">شراكة</span>':'')+
       '</div></div>'+
       '<div class="ops">'+
+        (USER.role==='admin'?'<button class="btn btn-ghost btn-sm" onclick="exportPdf(\''+o.id+'\')">PDF</button>':'')+
         '<button class="btn btn-ghost btn-sm" onclick="editActivity(\''+o.id+'\')">تعديل</button>'+
         '<button class="btn btn-ghost btn-sm" onclick="askDelete(\''+o.id+'\')">حذف</button>'+
       '</div></div>';
@@ -390,7 +451,7 @@ function viewActivity(id){
       '<img loading="lazy" src="https://drive.google.com/thumbnail?id='+pid+'&sz=w200"></a></div>';
   }).join('');
   var body=
-    dl('النوع', o.type==='يوم عالمي'&&o.world_day?(o.type+' — '+o.world_day):o.type)+
+    dl('النوع', o.type==='يوم عالمي'&&o.world_day?((o.display_type||o.type)+' — '+o.world_day):(o.display_type||o.type))+
     dl('العنوان', o.title)+ dl('الهدف', o.objective)+ dl('الفئة المستهدفة', o.target_groups)+
     dl('تاريخ التنفيذ', o.event_date+' · '+o.month_name+' · '+o.quarter)+
     dl('المكان', o.location)+ dl('آلية التنفيذ', o.mechanism)+
@@ -405,10 +466,10 @@ function viewActivity(id){
 function editActivity(id){
   var o=window._recs[id]; if(!o) return;
   FORM=newForm();
-  FORM.id=o.id; FORM.type=o.type; FORM.world_day=o.world_day; FORM.title=o.title;
+  FORM.id=o.id; FORM.type=o.type; FORM.type_custom=o.type_custom||''; FORM.world_day=o.world_day; FORM.title=o.title;
   FORM.objective=o.objective; FORM.event_date=isoDate(o.event_date);
   FORM.target_groups=o.target_groups?String(o.target_groups).split(' ، '):[];
-  FORM.location=o.location; FORM.mechanism=o.mechanism; FORM.beneficiaries=o.beneficiaries;
+  FORM.location=o.location; FORM.mechanism=o.mechanism; FORM.mechanisms=splitList(o.mechanism); FORM.beneficiaries=o.beneficiaries;
   FORM.has_partnership=(o.has_partnership===true||o.has_partnership==='true');
   FORM.partners=o.partners?String(o.partners).split(' ، '):[];
   FORM.existing_photo_ids=(o.photo_ids||[]).slice();
@@ -420,18 +481,29 @@ function editActivity(id){
 function askDelete(id){
   var o=window._recs[id];
   confirmModal('حذف الفعالية','سيُحذف سجل «'+esc(o.title)+'» نهائيًا. هل أنت متأكد؟',function(){
-    run('deleteActivity',id).then(function(r){
+    run('deleteActivity',id,USER.no).then(function(r){
       if(r.ok){ invalidateCaches(); toast('تم الحذف.','ok'); loadRecords(true); }
       else toast('تعذّر الحذف.','err');
     });
   }, true);
 }
 
+function exportPdf(id){
+  var o=window._recs[id]; if(!o) return;
+  toast('جارٍ إنشاء ملف PDF…');
+  run('exportActivityPdf',id,USER.no).then(function(r){
+    if(r&&r.ok){ toast('تم إنشاء ملف PDF.','ok'); window.open(r.url,'_blank'); }
+    else toast((r&&r.msg)||'تعذّر إنشاء PDF.','err');
+  }).catch(function(e){
+    toast((e&&e.message)||'تعذّر إنشاء PDF.','err');
+  });
+}
+
 /* ====================== لوحة المؤشرات ====================== */
 function renderDashboard(){
   document.getElementById('view').innerHTML='<div class="card"><div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div></div>';
   if(DASH_CACHE){ paintDash(DASH_CACHE); return; }
-  run('getDashboard', USER.no, USER.role).then(function(d){ DASH_CACHE=d; paintDash(d); });
+  run('getDashboard', USER.no).then(function(d){ DASH_CACHE=d; paintDash(d); });
 }
 function paintDash(d){
   document.getElementById('view').innerHTML=
@@ -443,7 +515,10 @@ function paintDash(d){
       kpi(d.partnerships,'فعاليات بشراكات')+ kpi(Object.keys(d.byType).length,'أنواع مختلفة')+
     '</div>'+
     '<div class="section-divider"></div><label>التوزيع حسب النوع</label>'+ bars(d.byType) +
+    '<div class="section-divider"></div><label>التوزيع حسب آلية التنفيذ</label>'+ bars(d.byMechanism) +
     '<div class="section-divider"></div><label>التوزيع حسب الشهر</label>'+ bars(d.byMonth) +
+    '<div class="section-divider"></div><label>التوزيع حسب نصف السنة</label>'+ bars(d.byHalf) +
+    '<div class="section-divider"></div><label>التوزيع حسب الربع</label>'+ bars(d.byQuarter) +
     (USER.role==='admin'?('<div class="section-divider"></div><label>حسب المنفّذة</label>'+bars(d.byExecutor)):'')+
   '</div>';
 }
@@ -470,8 +545,8 @@ function renderAdmin(){
     cfgBlock('آليات التنفيذ','mechanism')+
   '</div>'+
   '<div class="card"><h2>التصدير</h2>'+
-    '<p class="sub">تصدير منظّم بالصور (PDF) وقالب المديرية (Excel) — يُفعَّل بعد رفع القالب الرسمي والشعار.</p>'+
-    '<button class="btn btn-ghost" onclick="toast(\'سيُفعَّل التصدير بعد رفع القالب الرسمي والشعار.\')">تصدير (قريبًا)</button>'+
+    '<p class="sub">تصدير PDF متاح من زر PDF داخل سجل الفعاليات. تصدير Excel سيُفعّل عند إضافة قالب Excel الرسمي.</p>'+
+    '<button class="btn btn-ghost" disabled>Excel بانتظار القالب</button>'+
   '</div>';
 }
 function cfgBlock(title,cat){
@@ -487,7 +562,7 @@ function cfgTags(cat){
 }
 function addCfg(cat){
   var inp=document.getElementById('add_'+cat); var v=inp.value.trim(); if(!v) return;
-  run('addConfigItem',cat,v).then(function(r){
+  run('addConfigItem',cat,v,USER.no).then(function(r){
     if(!r.ok){ toast(r.msg,'err'); return; }
     CONFIG=r.config; inp.value=''; document.getElementById('cfg_'+cat).innerHTML=cfgTags(cat);
     toast('أُضيف العنصر.','ok');
@@ -495,7 +570,7 @@ function addCfg(cat){
 }
 function rmCfg(cat,v){
   confirmModal('تعطيل عنصر','سيُخفى «'+esc(v)+'» من النماذج (تبقى السجلات القديمة سليمة). متابعة؟',function(){
-    run('removeConfigItem',cat,v).then(function(r){
+    run('removeConfigItem',cat,v,USER.no).then(function(r){
       if(!r.ok){ toast(r.msg,'err'); return; }
       CONFIG=r.config; document.getElementById('cfg_'+cat).innerHTML=cfgTags(cat);
       toast('تم التعطيل.','ok');
@@ -528,4 +603,5 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
 function dl(k,v){ if(v==null||v==='') return ''; return '<div class="dl-row"><span>'+k+'</span><span>'+esc(v)+'</span></div>'; }
 function nowTime(){ var d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
 function isoDate(s){ if(!s) return ''; var p=String(s).split('/'); if(p.length===3) return p[0]+'-'+('0'+p[1]).slice(-2)+'-'+('0'+p[2]).slice(-2); return s; }
+function splitList(s){ return String(s||'').split(/[،,]/).map(function(x){return x.trim();}).filter(Boolean); }
 </script>

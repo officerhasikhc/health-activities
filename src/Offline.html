@@ -70,7 +70,7 @@ var Outbox = (function () {
                 else res(); // يبقى معلّقًا
               })
               .withFailureHandler(function () { res(); })
-              .saveActivity(it.payload);
+              .saveActivity(it.payload, it.payload._actor_no || it.payload.created_by_no || it.payload.executor_no);
           });
         });
       });

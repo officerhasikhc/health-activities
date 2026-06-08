@@ -27,7 +27,12 @@ var ACT_HEADERS = ['id','created_at','created_by_no','created_by_name',
   'executor_no','executor_name','type','world_day','title','objective',
   'target_groups','event_date','year','month','month_name','quarter',
   'location','mechanism','beneficiaries','has_partnership','partners',
-  'photo_folder_id','photo_ids','notes','status'];
+  'photo_folder_id','photo_ids','notes','status','type_custom'];
+
+var LIST_SEP = ' ، ';
+var OTHER_VALUE = 'أخرى';
+var OFFICIAL_LETTER_NAME = 'officiallyletter.jpg';
+var REPORT_ROOT_NAME = 'أثر - تقارير PDF';
 
 // ============================ نقطة الدخول ============================
 function doGet() {
@@ -85,6 +90,7 @@ function setup() {
 
   // --- Activities ---
   var act = getOrCreateSheet_(ss, SHEETS.ACTIVITIES, ACT_HEADERS);
+  ensureSheetHeaders_(act, ACT_HEADERS);
 
   // --- مجلد الصور ---
   var folderId = PROP.getProperty('PHOTO_ROOT_ID');
@@ -105,14 +111,39 @@ function getOrCreateSheet_(ss, name, headers) {
   if (sh.getLastRow() === 0 && headers) {
     sh.getRange(1,1,1,headers.length).setValues([headers]).setFontWeight('bold');
     sh.setFrozenRows(1);
+  } else if (headers) {
+    ensureSheetHeaders_(sh, headers);
   }
   return sh;
+}
+
+function ensureSheetHeaders_(sh, headers) {
+  if (!headers || !headers.length) return;
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1,1,1,headers.length).setValues([headers]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    return;
+  }
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var current = sh.getRange(1,1,1,lastCol).getValues()[0].filter(function(h){ return h !== ''; });
+  var missing = headers.filter(function(h){ return current.indexOf(h) < 0; });
+  if (missing.length) {
+    sh.getRange(1,current.length + 1,1,missing.length).setValues([missing]).setFontWeight('bold');
+  }
+  sh.setFrozenRows(1);
 }
 
 function ss_() {
   var id = PROP.getProperty('SHEET_ID');
   if (!id) throw new Error('النظام غير مهيّأ. شغّل دالة setup أولًا.');
   return SpreadsheetApp.openById(id);
+}
+
+function activitiesSheet_() {
+  var sh = ss_().getSheetByName(SHEETS.ACTIVITIES);
+  if (!sh) sh = ss_().insertSheet(SHEETS.ACTIVITIES);
+  ensureSheetHeaders_(sh, ACT_HEADERS);
+  return sh;
 }
 
 /**
@@ -175,7 +206,9 @@ function diagnoseSetup() {
 function init(empNo) {
   var lr = login(empNo);
   if (!lr.ok) return lr;
-  return { ok: true, user: lr.user, config: getConfig() };
+  var config = getConfig();
+  if (lr.user.role === 'admin') config.users = getActiveUsersForAdmin_();
+  return { ok: true, user: lr.user, config: config };
 }
 
 // ============================ المصادقة ============================
@@ -183,7 +216,7 @@ function login(empNo) {
   empNo = String(empNo || '').trim();
   if (!empNo) return { ok: false, msg: 'أدخل الرقم الوظيفي.' };
   var users = getUsers_();
-  var u = users.filter(function(x){ return String(x.emp_no) === empNo && x.active; })[0];
+  var u = users.filter(function(x){ return String(x.emp_no) === empNo && isActive_(x.active); })[0];
   if (!u) return { ok: false, msg: 'الرقم الوظيفي غير مسجّل.' };
   return { ok: true, user: { no: u.emp_no, name: u.name, role: u.role, title: u.title } };
 }
@@ -200,6 +233,37 @@ function getUsers_() {
   });
   CACHE.put('users', JSON.stringify(rows), 21600);
   return rows;
+}
+
+function isActive_(v) {
+  return v === true || String(v).toLowerCase() === 'true' || String(v) === '1';
+}
+
+function findActiveUser_(empNo) {
+  empNo = String(empNo || '').trim();
+  var users = getUsers_();
+  for (var i = 0; i < users.length; i++) {
+    if (String(users[i].emp_no) === empNo && isActive_(users[i].active)) return users[i];
+  }
+  return null;
+}
+
+function requireActiveUser_(empNo) {
+  var user = findActiveUser_(empNo);
+  if (!user) throw new Error('المستخدم غير مخوّل أو غير نشط.');
+  return user;
+}
+
+function requireAdmin_(empNo) {
+  var user = requireActiveUser_(empNo);
+  if (user.role !== 'admin') throw new Error('هذه العملية متاحة للمسؤول فقط.');
+  return user;
+}
+
+function getActiveUsersForAdmin_() {
+  return getUsers_().filter(function(u){ return isActive_(u.active); }).map(function(u){
+    return { no:String(u.emp_no), name:u.name, role:u.role, title:u.title };
+  });
 }
 
 // ============================ القوائم (Config) ============================
@@ -224,7 +288,8 @@ function getConfig() {
 }
 
 // إدارة فقط: إضافة عنصر لقائمة وينعكس في كل الصفحات
-function addConfigItem(category, value) {
+function addConfigItem(category, value, actorEmpNo) {
+  requireAdmin_(actorEmpNo);
   value = String(value || '').trim();
   if (!value) return { ok:false, msg:'القيمة فارغة.' };
   var sh = ss_().getSheetByName(SHEETS.CONFIG);
@@ -237,40 +302,111 @@ function addConfigItem(category, value) {
   data.forEach(function(r){ if(r[0]===category && r[3]>max) max=r[3]; });
   sh.appendRow([category, value, true, max+1]);
   CACHE.remove('cfg');
-  return { ok:true, config:getConfig() };
+  var config = getConfig();
+  config.users = getActiveUsersForAdmin_();
+  return { ok:true, config:config };
 }
 
-function removeConfigItem(category, value) {
+function removeConfigItem(category, value, actorEmpNo) {
+  requireAdmin_(actorEmpNo);
   var sh = ss_().getSheetByName(SHEETS.CONFIG);
   var data = sh.getDataRange().getValues();
   for (var i=1;i<data.length;i++){
     if (data[i][0]===category && String(data[i][1]).trim()===String(value).trim()){
       sh.getRange(i+1,3).setValue(false); // تعطيل بدل حذف للحفاظ على السجلات القديمة
       CACHE.remove('cfg');
-      return { ok:true, config:getConfig() };
+      var config = getConfig();
+      config.users = getActiveUsersForAdmin_();
+      return { ok:true, config:config };
     }
   }
   return { ok:false, msg:'لم يُعثر على العنصر.' };
 }
 
 // ============================ الفعاليات ============================
-function saveActivity(payload) {
+function getSheetHeaders_(sh) {
+  if (sh.getLastRow() === 0) return [];
+  return sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+}
+
+function rowObject_(sh, rowIndex) {
+  var head = getSheetHeaders_(sh);
+  var values = sh.getRange(rowIndex,1,1,head.length).getValues()[0];
+  var o = {};
+  head.forEach(function(h,i){ if (h) o[h] = values[i]; });
+  return o;
+}
+
+function normalizeList_(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) {
+    return v.map(function(x){ return String(x || '').trim(); }).filter(Boolean);
+  }
+  return String(v).split(/[،,]/).map(function(x){ return String(x || '').trim(); }).filter(Boolean);
+}
+
+function uniqueList_(arr) {
+  var seen = {};
+  return (arr || []).filter(function(v){
+    v = String(v || '').trim();
+    if (!v || seen[v]) return false;
+    seen[v] = true;
+    return true;
+  });
+}
+
+function storedList_(v) {
+  return uniqueList_(normalizeList_(v)).join(LIST_SEP);
+}
+
+function activityDisplayType_(o) {
+  if (String(o.type || '') === OTHER_VALUE && o.type_custom) return o.type_custom;
+  return o.type || '';
+}
+
+function saveActivity(payload, actorEmpNo) {
   payload = payload || {};
+  var actor = requireActiveUser_(actorEmpNo || payload.created_by_no || payload.executor_no);
+  var isAdmin = actor.role === 'admin';
   // التحقق من الحقول الإلزامية في الخادم أيضًا
   var required = ['type','title','objective','event_date','executor_no'];
   for (var i=0;i<required.length;i++){
     if (!payload[required[i]]) return { ok:false, msg:'حقول إلزامية ناقصة.' };
   }
-  var sh = ss_().getSheetByName(SHEETS.ACTIVITIES);
+  if (String(payload.type) === OTHER_VALUE && !String(payload.type_custom || '').trim()) {
+    return { ok:false, msg:'اكتب نوع الفعالية عند اختيار أخرى.' };
+  }
+  if (String(payload.type) === 'يوم عالمي' && !String(payload.world_day || '').trim()) {
+    return { ok:false, msg:'اكتب اسم اليوم العالمي.' };
+  }
+
+  var sh = activitiesSheet_();
   var id = payload.id || ('ACT-' + Date.now());
   var isNew = !payload.id;
+  var oldRowIndex = isNew ? -1 : findRowById_(sh, id);
+  var oldRow = oldRowIndex > 0 ? rowObject_(sh, oldRowIndex) : null;
+
+  if (!isNew && oldRow && !isAdmin && String(oldRow.executor_no) !== String(actor.emp_no)) {
+    return { ok:false, msg:'لا يمكنك تعديل سجل مستخدم آخر.' };
+  }
+
+  var executor = actor;
+  if (isAdmin) {
+    executor = findActiveUser_(payload.executor_no);
+    if (!executor) return { ok:false, msg:'المنفّذ المختار غير نشط أو غير موجود.' };
+  } else {
+    payload.executor_no = actor.emp_no;
+    payload.executor_name = actor.name;
+  }
 
   // معالجة التاريخ
   var d = new Date(payload.event_date);
+  if (isNaN(d)) return { ok:false, msg:'تاريخ التنفيذ غير صالح.' };
   var year = d.getFullYear();
   var month = d.getMonth() + 1;
   var monthName = AR_MONTHS[d.getMonth()];
   var quarter = 'الربع ' + ['الأول','الثاني','الثالث','الرابع'][Math.floor((month-1)/3)];
+  var mechanisms = storedList_(payload.mechanisms || payload.mechanism);
 
   // رفع الصور (إن وُجدت صور جديدة base64)
   var folderId = payload.photo_folder_id || '';
@@ -293,23 +429,24 @@ function saveActivity(payload) {
 
   var row = {
     id: id,
-    created_at: isNew ? new Date() : (payload.created_at || new Date()),
-    created_by_no: payload.created_by_no || payload.executor_no,
-    created_by_name: payload.created_by_name || payload.executor_name,
-    executor_no: payload.executor_no,
-    executor_name: payload.executor_name,
+    created_at: isNew ? new Date() : ((oldRow && oldRow.created_at) || payload.created_at || new Date()),
+    created_by_no: isNew ? actor.emp_no : ((oldRow && oldRow.created_by_no) || actor.emp_no),
+    created_by_name: isNew ? actor.name : ((oldRow && oldRow.created_by_name) || actor.name),
+    executor_no: executor.emp_no,
+    executor_name: executor.name,
     type: payload.type,
+    type_custom: String(payload.type) === OTHER_VALUE ? String(payload.type_custom || '').trim() : '',
     world_day: payload.type === 'يوم عالمي' ? (payload.world_day || '') : '',
     title: payload.title,
     objective: payload.objective,
-    target_groups: (payload.target_groups || []).join(' ، '),
+    target_groups: storedList_(payload.target_groups),
     event_date: payload.event_date,
     year: year, month: month, month_name: monthName, quarter: quarter,
     location: payload.location || '',
-    mechanism: payload.mechanism || '',
+    mechanism: mechanisms,
     beneficiaries: payload.beneficiaries || '',
     has_partnership: !!payload.has_partnership,
-    partners: payload.has_partnership ? (payload.partners || []).join(' ، ') : '',
+    partners: payload.has_partnership ? storedList_(payload.partners) : '',
     photo_folder_id: folderId,
     photo_ids: photoIds.join(','),
     notes: payload.notes || '',
@@ -321,7 +458,7 @@ function saveActivity(payload) {
   if (isNew) {
     sh.appendRow(values);
   } else {
-    var rowIndex = findRowById_(sh, id);
+    var rowIndex = oldRowIndex;
     if (rowIndex < 0) { sh.appendRow(values); }
     else { sh.getRange(rowIndex, 1, 1, values.length).setValues([values]); }
   }
@@ -334,8 +471,9 @@ function findRowById_(sh, id) {
   return -1;
 }
 
-function getActivities(empNo, role, year, month) {
-  var sh = ss_().getSheetByName(SHEETS.ACTIVITIES);
+function getActivities(empNo, year, month) {
+  var user = requireActiveUser_(empNo);
+  var sh = activitiesSheet_();
   if (sh.getLastRow() < 2) return [];
   var data = sh.getDataRange().getValues();
   var head = data.shift();
@@ -344,7 +482,7 @@ function getActivities(empNo, role, year, month) {
   }).filter(function(o){ return o.id; });
 
   // الموظفة ترى سجلها فقط؛ المشرف يرى الكل
-  if (role !== 'admin') {
+  if (user.role !== 'admin') {
     rows = rows.filter(function(o){ return String(o.executor_no)===String(empNo); });
   }
   if (year) rows = rows.filter(function(o){ return String(o.year)===String(year); });
@@ -352,12 +490,14 @@ function getActivities(empNo, role, year, month) {
 
   rows.sort(function(a,b){ return new Date(b.event_date) - new Date(a.event_date); });
   return rows.map(function(o){
+    var displayType = activityDisplayType_(o);
     return {
-      id:o.id, type:o.type, world_day:o.world_day, title:o.title,
+      id:o.id, type:o.type, type_custom:o.type_custom || '', display_type:displayType,
+      world_day:o.world_day, title:o.title,
       objective:o.objective, target_groups:o.target_groups,
       event_date:formatDate_(o.event_date), month_name:o.month_name,
       quarter:o.quarter, year:o.year, month:o.month,
-      executor_name:o.executor_name, location:o.location,
+      executor_no:o.executor_no, executor_name:o.executor_name, location:o.location,
       mechanism:o.mechanism, beneficiaries:o.beneficiaries,
       has_partnership:o.has_partnership, partners:o.partners,
       notes:o.notes, photo_ids:o.photo_ids ? String(o.photo_ids).split(',').filter(Boolean) : [],
@@ -366,10 +506,15 @@ function getActivities(empNo, role, year, month) {
   });
 }
 
-function deleteActivity(id) {
-  var sh = ss_().getSheetByName(SHEETS.ACTIVITIES);
+function deleteActivity(id, actorEmpNo) {
+  var user = requireActiveUser_(actorEmpNo);
+  var sh = activitiesSheet_();
   var rowIndex = findRowById_(sh, id);
   if (rowIndex < 0) return { ok:false, msg:'غير موجود.' };
+  var row = rowObject_(sh, rowIndex);
+  if (user.role !== 'admin' && String(row.executor_no) !== String(user.emp_no)) {
+    return { ok:false, msg:'لا يمكنك حذف سجل مستخدم آخر.' };
+  }
   sh.deleteRow(rowIndex);
   return { ok:true };
 }
@@ -382,9 +527,10 @@ function formatDate_(v) {
 }
 
 // ============================ لوحة المؤشرات ============================
-function getDashboard(empNo, role) {
-  var sh = ss_().getSheetByName(SHEETS.ACTIVITIES);
-  var out = { total:0, beneficiaries:0, byType:{}, byMonth:{}, partnerships:0, byExecutor:{} };
+function getDashboard(empNo) {
+  var user = requireActiveUser_(empNo);
+  var sh = activitiesSheet_();
+  var out = { total:0, beneficiaries:0, byType:{}, byMonth:{}, byHalf:{}, byQuarter:{}, byMechanism:{}, partnerships:0, byExecutor:{} };
   if (sh.getLastRow() < 2) return out;
   var data = sh.getDataRange().getValues();
   var head = data.shift();
@@ -392,13 +538,128 @@ function getDashboard(empNo, role) {
 
   data.forEach(function(r){
     if (!r[idx.id]) return;
-    if (role !== 'admin' && String(r[idx.executor_no]) !== String(empNo)) return;
+    if (user.role !== 'admin' && String(r[idx.executor_no]) !== String(empNo)) return;
     out.total++;
     var b = parseInt(r[idx.beneficiaries],10); if(!isNaN(b)) out.beneficiaries += b;
-    var t = r[idx.type] || 'غير محدد'; out.byType[t] = (out.byType[t]||0)+1;
+    var t = (String(r[idx.type] || '') === OTHER_VALUE && idx.type_custom != null && r[idx.type_custom])
+      ? r[idx.type_custom] : (r[idx.type] || 'غير محدد');
+    out.byType[t] = (out.byType[t]||0)+1;
     var m = r[idx.month_name] || ''; if(m) out.byMonth[m] = (out.byMonth[m]||0)+1;
+    var monthNo = parseInt(r[idx.month],10);
+    if (!isNaN(monthNo)) {
+      var half = monthNo <= 6 ? 'النصف الأول' : 'النصف الثاني';
+      out.byHalf[half] = (out.byHalf[half] || 0) + 1;
+    }
+    var q = r[idx.quarter] || ''; if(q) out.byQuarter[q] = (out.byQuarter[q]||0)+1;
+    normalizeList_(r[idx.mechanism]).forEach(function(mech){
+      out.byMechanism[mech] = (out.byMechanism[mech] || 0) + 1;
+    });
     if (r[idx.has_partnership]===true || r[idx.has_partnership]==='true') out.partnerships++;
     var ex = r[idx.executor_name] || ''; if(ex) out.byExecutor[ex] = (out.byExecutor[ex]||0)+1;
   });
   return out;
+}
+
+// ============================ التصدير PDF ============================
+function exportActivityPdf(id, actorEmpNo) {
+  requireAdmin_(actorEmpNo);
+  var sh = activitiesSheet_();
+  var rowIndex = findRowById_(sh, id);
+  if (rowIndex < 0) return { ok:false, msg:'لم يُعثر على الفعالية.' };
+
+  var activity = rowObject_(sh, rowIndex);
+  activity.display_type = activityDisplayType_(activity);
+  var letter = getOfficialLetterBlob_();
+  var photos = String(activity.photo_ids || '').split(',').filter(Boolean).map(function(pid){
+    try { return blobDataUri_(DriveApp.getFileById(pid).getBlob()); }
+    catch (e) { return ''; }
+  }).filter(Boolean);
+
+  var html = buildActivityPdfHtml_(activity, blobDataUri_(letter), photos);
+  var fileName = safeFileName_('تقرير ' + formatDate_(activity.event_date) + ' - ' + activity.title) + '.pdf';
+  var pdf = Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
+    .getAs(MimeType.PDF)
+    .setName(fileName);
+
+  var outFile = getReportRoot_().createFile(pdf);
+  outFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return { ok:true, name:fileName, url:outFile.getUrl(), id:outFile.getId() };
+}
+
+function getReportRoot_() {
+  var folderId = PROP.getProperty('REPORT_ROOT_ID');
+  if (folderId) {
+    try { return DriveApp.getFolderById(folderId); } catch (e) {}
+  }
+  var f = DriveApp.createFolder(REPORT_ROOT_NAME);
+  PROP.setProperty('REPORT_ROOT_ID', f.getId());
+  return f;
+}
+
+function getOfficialLetterBlob_() {
+  var fileId = PROP.getProperty('OFFICIAL_LETTER_ID');
+  if (fileId) {
+    try { return DriveApp.getFileById(fileId).getBlob(); } catch (e) {}
+  }
+  var files = DriveApp.getFilesByName(OFFICIAL_LETTER_NAME);
+  if (!files.hasNext()) {
+    throw new Error('لم يُعثر على قالب الخطاب الرسمي في Drive باسم ' + OFFICIAL_LETTER_NAME + '.');
+  }
+  var file = files.next();
+  PROP.setProperty('OFFICIAL_LETTER_ID', file.getId());
+  return file.getBlob();
+}
+
+function blobDataUri_(blob) {
+  return 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes());
+}
+
+function safeFileName_(name) {
+  return String(name || 'تقرير أثر')
+    .replace(/[\\\/:*?"<>|#%\{\}\[\]~&]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .substring(0, 140);
+}
+
+function html_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function pdfRow_(label, value) {
+  if (value == null || value === '') return '';
+  return '<div class="row"><span>' + html_(label) + '</span><b>' + html_(value) + '</b></div>';
+}
+
+function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
+  var typeLabel = a.display_type || a.type || '';
+  if (String(a.type || '') === 'يوم عالمي' && a.world_day) typeLabel += ' - ' + a.world_day;
+  var details =
+    pdfRow_('نوع الفعالية', typeLabel) +
+    pdfRow_('العنوان', a.title) +
+    pdfRow_('الهدف', a.objective) +
+    pdfRow_('الفئة المستهدفة', a.target_groups) +
+    pdfRow_('تاريخ التنفيذ', formatDate_(a.event_date) + ' - ' + (a.month_name || '') + ' - ' + (a.quarter || '')) +
+    pdfRow_('المكان', a.location) +
+    pdfRow_('آلية التنفيذ', a.mechanism) +
+    pdfRow_('عدد المستفيدين', a.beneficiaries) +
+    pdfRow_('المنفّذة', a.executor_name) +
+    ((a.has_partnership === true || a.has_partnership === 'true') ? pdfRow_('الجهات المشاركة', a.partners) : '') +
+    pdfRow_('ملاحظات', a.notes);
+
+  var pages = [];
+  pages.push('<section class="page"><main class="content first"><h1>تقرير توثيق فعالية</h1>' + details + '</main></section>');
+
+  for (var i = 0; i < photoDataUris.length; i += 3) {
+    var chunk = photoDataUris.slice(i, i + 3).map(function(src, n){
+      return '<figure><img src="' + src + '"><figcaption>صورة ' + (i + n + 1) + '</figcaption></figure>';
+    }).join('');
+    pages.push('<section class="page"><main class="content photos"><h2>' + html_(a.title) + '</h2><div class="photo-list">' + chunk + '</div></main></section>');
+  }
+
+  return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
+    '<style>@page{size:A4;margin:0}html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#1d2733}.page{width:210mm;height:297mm;position:relative;box-sizing:border-box;page-break-after:always;background:url("' + letterDataUri + '") center/cover no-repeat;overflow:hidden}.page:last-child{page-break-after:auto}.content{position:absolute;inset:48mm 18mm 22mm 18mm}.first h1{font-size:18pt;margin:0 0 8mm;text-align:center;color:#123a46}.row{display:grid;grid-template-columns:36mm 1fr;gap:5mm;border-bottom:1px solid #dfe4ea;padding:3.3mm 0;font-size:10.5pt;line-height:1.55}.row span{color:#5b6b7b;font-weight:bold}.row b{font-weight:500;white-space:pre-wrap}.photos h2{font-size:14pt;margin:0 0 6mm;text-align:center;color:#123a46}.photo-list{display:grid;grid-template-rows:repeat(3,1fr);gap:6mm;height:210mm}figure{margin:0;border:1px solid #dfe4ea;padding:2mm;background:rgba(255,255,255,.92);display:flex;flex-direction:column;gap:1.5mm}figure img{width:100%;height:58mm;object-fit:contain}figcaption{text-align:center;color:#5b6b7b;font-size:9pt}</style>' +
+    '</head><body>' + pages.join('') + '</body></html>';
 }
