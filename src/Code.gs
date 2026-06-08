@@ -27,12 +27,13 @@ var ACT_HEADERS = ['id','created_at','created_by_no','created_by_name',
   'executor_no','executor_name','type','world_day','title','objective',
   'target_groups','event_date','year','month','month_name','quarter',
   'location','mechanism','beneficiaries','has_partnership','partners',
-  'photo_folder_id','photo_ids','notes','status','type_custom'];
+  'photo_folder_id','photo_ids','notes','status','type_custom','client_request_id'];
 
 var LIST_SEP = ' ، ';
 var OTHER_VALUE = 'أخرى';
 var OFFICIAL_LETTER_NAME = 'officiallyletter.jpg';
 var REPORT_ROOT_NAME = 'أثر - تقارير PDF';
+var EXCEL_REPORT_ROOT_NAME = 'أثر - تقارير Excel';
 var APP_LOGO_NAME = 'logo.png';
 var LOGIN_LOGO_NAME = 'logo-login.png';
 var OFFICIAL_APP_URL = 'https://officerhasikhc.github.io/health-activities/';
@@ -88,6 +89,7 @@ var API_METHODS = {
   getActivities: true,
   deleteActivity: true,
   exportActivityPdf: true,
+  exportActivitiesExcel: true,
   getDashboard: true,
   getDashboardItems: true,
   addConfigItem: true,
@@ -621,8 +623,37 @@ function activityDisplayType_(o) {
   return o.type || '';
 }
 
-function saveActivity(payload, actorEmpNo) {
+function normalizeActivityTitle_(payload) {
   payload = payload || {};
+  if (String(payload.type || '') === 'يوم عالمي') {
+    payload.world_day = String(payload.world_day || payload.title || '').trim();
+    payload.title = payload.world_day;
+  } else {
+    payload.title = String(payload.title || '').trim();
+    payload.world_day = '';
+  }
+}
+
+function activityTitle_(o) {
+  if (String((o && o.type) || '') === 'يوم عالمي') {
+    return String((o && (o.world_day || o.title)) || '').trim();
+  }
+  return String((o && o.title) || '').trim();
+}
+
+function saveActivity(payload, actorEmpNo) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return saveActivityLocked_(payload, actorEmpNo);
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+function saveActivityLocked_(payload, actorEmpNo) {
+  payload = payload || {};
+  normalizeActivityTitle_(payload);
   var actor = requireActiveUser_(actorEmpNo || payload.created_by_no || payload.executor_no);
   var isAdmin = actor.role === 'admin';
   if (!isAdmin) {
@@ -636,9 +667,21 @@ function saveActivity(payload, actorEmpNo) {
   }
 
   var sh = activitiesSheet_();
+  var requestId = String(payload.client_request_id || '').trim();
+  if (requestId) {
+    var duplicateRowIndex = findRowByClientRequestId_(sh, requestId);
+    if (duplicateRowIndex > 0) {
+      var duplicate = rowObject_(sh, duplicateRowIndex);
+      if (!isAdmin && String(duplicate.executor_no) !== String(actor.emp_no)) {
+        return { ok:false, msg:'لا يمكنك تعديل سجل مستخدم آخر.' };
+      }
+      return { ok:true, id:duplicate.id, deduped:true };
+    }
+  }
+
   var id = payload.id || ('ACT-' + Date.now());
-  var isNew = !payload.id;
-  var oldRowIndex = isNew ? -1 : findRowById_(sh, id);
+  var oldRowIndex = findRowById_(sh, id);
+  var isNew = oldRowIndex < 0;
   var oldRow = oldRowIndex > 0 ? rowObject_(sh, oldRowIndex) : null;
 
   if (!isNew && oldRow && !isAdmin && String(oldRow.executor_no) !== String(actor.emp_no)) {
@@ -705,7 +748,8 @@ function saveActivity(payload, actorEmpNo) {
     photo_folder_id: folderId,
     photo_ids: photoIds.join(','),
     notes: payload.notes || '',
-    status: 'محفوظ'
+    status: 'محفوظ',
+    client_request_id: requestId || ((oldRow && oldRow.client_request_id) || '')
   };
 
   var values = ACT_HEADERS.map(function(h){ return row[h]; });
@@ -721,13 +765,18 @@ function saveActivity(payload, actorEmpNo) {
 }
 
 function missingRequiredFields_(payload) {
+  normalizeActivityTitle_(payload);
   var required = getRequiredFields_();
   var missing = [];
   function add(key) { missing.push(REQUIRED_FIELD_LABELS[key] || key); }
   function hasText(v) { return String(v == null ? '' : v).trim() !== ''; }
 
   if (!hasText(payload.type)) add('type');
-  if (!hasText(payload.title)) add('title');
+  if (String(payload.type) === 'يوم عالمي') {
+    if (!hasText(payload.world_day)) add('world_day');
+  } else if (!hasText(payload.title)) {
+    add('title');
+  }
   if (!hasText(payload.event_date)) add('event_date');
   if (!hasText(payload.executor_no)) add('executor_no');
   if (String(payload.type) === OTHER_VALUE && !hasText(payload.type_custom)) missing.push('نوع آخر');
@@ -737,7 +786,6 @@ function missingRequiredFields_(payload) {
   if (required.mechanism && !normalizeList_(payload.mechanisms || payload.mechanism).length) add('mechanism');
   if (required.beneficiaries && !hasText(payload.beneficiaries)) add('beneficiaries');
   if (required.location && !hasText(payload.location)) add('location');
-  if (required.world_day && String(payload.type) === 'يوم عالمي' && !hasText(payload.world_day)) add('world_day');
   if (required.partners && payload.has_partnership && !normalizeList_(payload.partners).length) add('partners');
   if (required.notes && !hasText(payload.notes)) add('notes');
 
@@ -753,11 +801,88 @@ function findRowById_(sh, id) {
   return -1;
 }
 
-function getActivities(empNo, year, month) {
+function findRowByClientRequestId_(sh, requestId) {
+  requestId = String(requestId || '').trim();
+  if (!requestId || sh.getLastRow() < 2) return -1;
+  var head = getSheetHeaders_(sh);
+  var idx = head.indexOf('client_request_id');
+  if (idx < 0) return -1;
+  var values = sh.getRange(2, idx + 1, sh.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === requestId) return i + 2;
+  }
+  return -1;
+}
+
+function normalizePeriodFilter_(filterOrYear, month) {
+  var now = new Date();
+  var current = { mode:'current_month', year:now.getFullYear(), month:now.getMonth() + 1 };
+  if (filterOrYear && typeof filterOrYear === 'object') {
+    var f = {
+      mode: String(filterOrYear.mode || 'current_month'),
+      year: parseInt(filterOrYear.year, 10) || current.year,
+      month: parseInt(filterOrYear.month, 10) || current.month,
+      quarter: parseInt(filterOrYear.quarter, 10) || Math.floor((current.month - 1) / 3) + 1,
+      half: parseInt(filterOrYear.half, 10) || (current.month <= 6 ? 1 : 2)
+    };
+    if (['current_month','month','quarter','half','year','all'].indexOf(f.mode) < 0) f.mode = 'current_month';
+    return f;
+  }
+  if (filterOrYear || month) {
+    return {
+      mode: month ? 'month' : 'year',
+      year: parseInt(filterOrYear, 10) || current.year,
+      month: parseInt(month, 10) || current.month,
+      quarter: Math.floor(((parseInt(month, 10) || current.month) - 1) / 3) + 1,
+      half: (parseInt(month, 10) || current.month) <= 6 ? 1 : 2
+    };
+  }
+  return current;
+}
+
+function activityYearMonth_(o) {
+  var y = parseInt(o.year, 10);
+  var m = parseInt(o.month, 10);
+  if (!y || !m) {
+    var d = new Date(o.event_date);
+    if (!isNaN(d)) { y = d.getFullYear(); m = d.getMonth() + 1; }
+  }
+  return { year:y, month:m };
+}
+
+function filterActivityRows_(rows, filter) {
+  filter = normalizePeriodFilter_(filter);
+  if (filter.mode === 'all') return rows;
+  return (rows || []).filter(function(o){
+    var ym = activityYearMonth_(o);
+    if (!ym.year || !ym.month) return false;
+    if (filter.mode === 'current_month' || filter.mode === 'month') {
+      return ym.year === filter.year && ym.month === filter.month;
+    }
+    if (filter.mode === 'quarter') {
+      return ym.year === filter.year && (Math.floor((ym.month - 1) / 3) + 1) === filter.quarter;
+    }
+    if (filter.mode === 'half') {
+      return ym.year === filter.year && (ym.month <= 6 ? 1 : 2) === filter.half;
+    }
+    if (filter.mode === 'year') return ym.year === filter.year;
+    return true;
+  });
+}
+
+function periodLabel_(filter) {
+  filter = normalizePeriodFilter_(filter);
+  if (filter.mode === 'all') return 'كل السجلات';
+  if (filter.mode === 'year') return 'سنة ' + filter.year;
+  if (filter.mode === 'half') return (filter.half === 1 ? 'النصف الأول' : 'النصف الثاني') + ' ' + filter.year;
+  if (filter.mode === 'quarter') return 'الربع ' + ['','الأول','الثاني','الثالث','الرابع'][filter.quarter] + ' ' + filter.year;
+  return AR_MONTHS[filter.month - 1] + ' ' + filter.year;
+}
+
+function getActivities(empNo, filterOrYear, month) {
   var user = requireActiveUser_(empNo);
   var rows = getVisibleActivityRows_(user);
-  if (year) rows = rows.filter(function(o){ return String(o.year)===String(year); });
-  if (month) rows = rows.filter(function(o){ return String(o.month)===String(month); });
+  rows = filterActivityRows_(rows, normalizePeriodFilter_(filterOrYear, month));
 
   rows.sort(function(a,b){ return new Date(b.event_date) - new Date(a.event_date); });
   return rows.map(activityClientRow_);
@@ -781,7 +906,7 @@ function activityClientRow_(o) {
   var displayType = activityDisplayType_(o);
   return {
     id:o.id, type:o.type, type_custom:o.type_custom || '', display_type:displayType,
-    world_day:o.world_day, title:o.title,
+    world_day:o.world_day, title:activityTitle_(o),
     objective:o.objective, target_groups:o.target_groups,
     event_date:formatDate_(o.event_date), month_name:o.month_name,
     quarter:o.quarter, year:o.year, month:o.month,
@@ -814,10 +939,10 @@ function formatDate_(v) {
 }
 
 // ============================ لوحة المؤشرات ============================
-function getDashboard(empNo) {
+function getDashboard(empNo, filter) {
   var user = requireActiveUser_(empNo);
   var out = { total:0, beneficiaries:0, byType:{}, byMonth:{}, byHalf:{}, byQuarter:{}, byMechanism:{}, partnerships:0, byExecutor:{} };
-  var rows = getVisibleActivityRows_(user);
+  var rows = filterActivityRows_(getVisibleActivityRows_(user), normalizePeriodFilter_(filter));
 
   rows.forEach(function(o){
     out.total++;
@@ -840,9 +965,9 @@ function getDashboard(empNo) {
   return out;
 }
 
-function getDashboardItems(empNo, dimension, key) {
+function getDashboardItems(empNo, dimension, key, filter) {
   var user = requireActiveUser_(empNo);
-  var rows = getVisibleActivityRows_(user).filter(function(o){
+  var rows = filterActivityRows_(getVisibleActivityRows_(user), normalizePeriodFilter_(filter)).filter(function(o){
     if (dimension === 'type') return String(activityDisplayType_(o) || 'غير محدد') === String(key);
     if (dimension === 'mechanism') return normalizeList_(o.mechanism).indexOf(String(key)) > -1;
     if (dimension === 'month') return String(o.month_name) === String(key);
@@ -876,7 +1001,8 @@ function exportActivityPdf(id, actorEmpNo) {
   }).filter(Boolean);
 
   var html = buildActivityPdfHtml_(activity, letterDataUri, photos);
-  var fileName = safeFileName_('تقرير ' + formatDate_(activity.event_date) + ' - ' + activity.title) + '.pdf';
+  var activityTitle = activityTitle_(activity);
+  var fileName = safeFileName_('تقرير ' + formatDate_(activity.event_date) + ' - ' + activityTitle) + '.pdf';
   var pdf = Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
     .getAs(MimeType.PDF)
     .setName(fileName);
@@ -900,6 +1026,100 @@ function getReportRoot_() {
   var f = DriveApp.createFolder(REPORT_ROOT_NAME);
   PROP.setProperty('REPORT_ROOT_ID', f.getId());
   return f;
+}
+
+function exportActivitiesExcel(filter, actorEmpNo) {
+  var user = requireActiveUser_(actorEmpNo);
+  var period = normalizePeriodFilter_(filter);
+  var periodLabel = periodLabel_(period);
+  var rows = filterActivityRows_(getVisibleActivityRows_(user), period);
+  rows.sort(function(a,b){ return new Date(b.event_date) - new Date(a.event_date); });
+
+  var preparedAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Muscat', 'yyyy/MM/dd HH:mm');
+  var temp = SpreadsheetApp.create('تقرير أثر مؤقت - ' + preparedAt);
+  var sh = temp.getSheets()[0];
+  sh.setName('سجل الفعاليات');
+  try { sh.setRightToLeft(true); } catch (e) {}
+
+  var headers = [
+    'تاريخ التنفيذ','الشهر','الربع','نصف السنة','النوع','العنوان / اسم اليوم العالمي',
+    'الهدف','الفئة المستهدفة','المكان','آلية التنفيذ','عدد المستفيدين',
+    'شراكات','الجهات المشاركة','المنفذة','ملاحظات','عدد الصور'
+  ];
+  var data = rows.map(function(o){
+    var ym = activityYearMonth_(o);
+    return [
+      formatDate_(o.event_date),
+      o.month_name || (ym.month ? AR_MONTHS[ym.month - 1] : ''),
+      o.quarter || '',
+      ym.month ? (ym.month <= 6 ? 'النصف الأول' : 'النصف الثاني') : '',
+      activityDisplayType_(o),
+      activityTitle_(o),
+      o.objective || '',
+      o.target_groups || '',
+      o.location || '',
+      o.mechanism || '',
+      o.beneficiaries || '',
+      (o.has_partnership === true || o.has_partnership === 'true') ? 'نعم' : 'لا',
+      o.partners || '',
+      o.executor_name || '',
+      o.notes || '',
+      String(o.photo_ids || '').split(',').filter(Boolean).length
+    ];
+  });
+
+  sh.getRange(1, 1).setValue('تقرير سجل الفعاليات');
+  sh.getRange(2, 1).setValue('إعداد: ' + (user.name || user.emp_no));
+  sh.getRange(3, 1).setValue('تاريخ الإعداد: ' + preparedAt);
+  sh.getRange(4, 1).setValue('الفترة: ' + periodLabel);
+  sh.getRange(5, 1).setValue('عدد السجلات: ' + rows.length);
+  sh.getRange(7, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#1a4d5c').setFontColor('#ffffff');
+  if (data.length) sh.getRange(8, 1, data.length, headers.length).setValues(data);
+  sh.setFrozenRows(7);
+  sh.autoResizeColumns(1, headers.length);
+  SpreadsheetApp.flush();
+
+  var fileName = safeFileName_('تقرير أثر - ' + (user.name || user.emp_no) + ' - ' + periodLabel) + '.xlsx';
+  var tempId = temp.getId();
+  var outFile;
+  try {
+    var blob = exportSpreadsheetAsXlsx_(tempId, fileName);
+    outFile = getExcelReportRoot_().createFile(blob);
+    outFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } finally {
+    try { DriveApp.getFileById(tempId).setTrashed(true); } catch (e2) {}
+  }
+  return {
+    ok:true,
+    name:fileName,
+    url:outFile.getUrl(),
+    downloadUrl:'https://drive.google.com/uc?export=download&id=' + outFile.getId(),
+    id:outFile.getId(),
+    count:rows.length,
+    period:periodLabel
+  };
+}
+
+function getExcelReportRoot_() {
+  var folderId = PROP.getProperty('EXCEL_REPORT_ROOT_ID');
+  if (folderId) {
+    try { return DriveApp.getFolderById(folderId); } catch (e) {}
+  }
+  var f = DriveApp.createFolder(EXCEL_REPORT_ROOT_NAME);
+  PROP.setProperty('EXCEL_REPORT_ROOT_ID', f.getId());
+  return f;
+}
+
+function exportSpreadsheetAsXlsx_(spreadsheetId, fileName) {
+  var url = 'https://docs.google.com/spreadsheets/d/' + spreadsheetId + '/export?format=xlsx';
+  var res = UrlFetchApp.fetch(url, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() >= 300) {
+    throw new Error('تعذّر إنشاء ملف Excel: HTTP ' + res.getResponseCode());
+  }
+  return res.getBlob().setName(fileName);
 }
 
 /**
@@ -950,10 +1170,11 @@ function pdfRow_(label, value) {
 
 function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
   var typeLabel = a.display_type || a.type || '';
-  if (String(a.type || '') === 'يوم عالمي' && a.world_day) typeLabel += ' - ' + a.world_day;
+  var title = activityTitle_(a);
+  var titleLabel = String(a.type || '') === 'يوم عالمي' ? 'اسم اليوم العالمي' : 'العنوان';
   var details =
     pdfRow_('نوع الفعالية', typeLabel) +
-    pdfRow_('العنوان', a.title) +
+    pdfRow_(titleLabel, title) +
     pdfRow_('الهدف', a.objective) +
     pdfRow_('الفئة المستهدفة', a.target_groups) +
     pdfRow_('تاريخ التنفيذ', formatDate_(a.event_date) + ' - ' + (a.month_name || '') + ' - ' + (a.quarter || '')) +
@@ -971,7 +1192,7 @@ function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
     var chunk = photoDataUris.slice(i, i + 3).map(function(src, n){
       return '<figure><img src="' + src + '"><figcaption>صورة ' + (i + n + 1) + '</figcaption></figure>';
     }).join('');
-    pages.push('<section class="page"><main class="content photos"><h2>' + html_(a.title) + '</h2><div class="photo-list">' + chunk + '</div></main></section>');
+    pages.push('<section class="page"><main class="content photos"><h2>' + html_(title) + '</h2><div class="photo-list">' + chunk + '</div></main></section>');
   }
 
   var pageBg = letterDataUri

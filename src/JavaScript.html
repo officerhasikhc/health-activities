@@ -5,16 +5,21 @@ var CONFIG = null;        // {activity_type, target_group, mechanism, users?}
 var FORM = null;
 var DRAFT_KEY = 'athar_draft';
 var REC_CACHE = {};       // ذاكرة مؤقتة للسجل حسب (سنة|شهر)
-var DASH_CACHE = null;    // ذاكرة مؤقتة للمؤشرات
+var DASH_CACHE = {};      // ذاكرة مؤقتة للمؤشرات حسب الفترة
 var deferredInstallPrompt = null;
 var REMEMBER_KEY = 'athar_remember_emp';
 var SAVED_EMP_KEY = 'athar_saved_emp';
 var SESSION_MSG_KEY = 'athar_session_msg';
+var SESSION_KEY = 'athar_session';
+var SUBMITTING = false;
+var PHOTO_VIEW = { ids:[], index:0, title:'' };
+var AR_MONTHS_UI = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+var _lastSessionTouch = 0;
 var IDLE_LIMIT_MS = 10 * 60 * 1000;
 var idleTimer = null;
 var idleEvents = ['click','keydown','touchstart','mousemove','scroll','input'];
 
-function invalidateCaches(){ REC_CACHE = {}; DASH_CACHE = null; }
+function invalidateCaches(){ REC_CACHE = {}; DASH_CACHE = {}; }
 
 /* ====================== مساعد استدعاء الخادم ====================== */
 function run(fn){
@@ -49,11 +54,8 @@ function doLogin(){
     if(!r.ok){ err.textContent=r.msg; return; }
     USER=r.user; CONFIG=r.config;
     saveRememberedEmp(no);
-    document.getElementById('loginScreen').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
-    document.getElementById('whoName').textContent=USER.name;
-    document.getElementById('whoTitle').textContent=USER.title;
-    startSessionGuard();
+    persistSession(no);
+    enterApp();
     boot();
   }).catch(function(e){
     btn.disabled=false; btn.textContent='دخول';
@@ -71,8 +73,53 @@ function logout(){
 function forceLogout(message){
   stopSessionGuard();
   USER=null; CONFIG=null; FORM=null;
+  clearSession();
   if(message) sessionStorage.setItem(SESSION_MSG_KEY, message);
   location.reload();
+}
+
+/* ====================== استمرارية الجلسة عبر التحديث ====================== */
+function persistSession(no){
+  try{
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      no: no || (USER && USER.no), user: USER, config: CONFIG, ts: Date.now()
+    }));
+    _lastSessionTouch = Date.now();
+  }catch(e){}
+}
+function touchSession(){
+  if(!USER) return;
+  var now = Date.now();
+  if(now - _lastSessionTouch < 20000) return; // تقليل عدد الكتابات
+  persistSession(USER.no);
+}
+function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
+function enterApp(){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('whoName').textContent=USER.name;
+  document.getElementById('whoTitle').textContent=USER.title;
+  startSessionGuard();
+}
+function restoreSession(){
+  var raw;
+  try{ raw = localStorage.getItem(SESSION_KEY); }catch(e){ return false; }
+  if(!raw) return false;
+  var s;
+  try{ s = JSON.parse(raw); }catch(e){ clearSession(); return false; }
+  if(!s || !s.user || !s.config){ clearSession(); return false; }
+  if(Date.now() - (s.ts||0) > IDLE_LIMIT_MS){ clearSession(); return false; }
+  USER = s.user; CONFIG = s.config;
+  enterApp();
+  boot();
+  // تحديث القوائم/الصلاحيات في الخلفية دون مقاطعة المستخدم
+  if(s.no){
+    run('init', s.no).then(function(r){
+      if(r && r.ok){ USER=r.user; CONFIG=r.config; persistSession(s.no); }
+      else { forceLogout('انتهت الجلسة. سجّل الدخول من جديد.'); }
+    }).catch(function(){});
+  }
+  return true;
 }
 function initLoginPrefs(){
   var emp=document.getElementById('empNo');
@@ -109,12 +156,17 @@ function onSessionActivity(){
 }
 function resetIdleTimer(){
   clearTimeout(idleTimer);
+  touchSession();
   idleTimer=setTimeout(function(){
     forceLogout('انتهت الجلسة بسبب عدم التفاعل لمدة 10 دقائق. سجّل الدخول مرة أخرى.');
   }, IDLE_LIMIT_MS);
 }
-document.addEventListener('DOMContentLoaded', initLoginPrefs);
-if(document.readyState!=='loading') initLoginPrefs();
+function bootstrapAuth(){
+  initLoginPrefs();
+  restoreSession();
+}
+document.addEventListener('DOMContentLoaded', bootstrapAuth);
+if(document.readyState!=='loading') bootstrapAuth();
 
 window.addEventListener('beforeinstallprompt', function(e){
   e.preventDefault();
@@ -167,12 +219,82 @@ function show(tab){
   else if(tab==='admin') renderAdmin();
 }
 
+/* ====================== الفترة والمعرّفات ====================== */
+function makeId(prefix){
+  return prefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+}
+function currentPeriod(){
+  var d=new Date();
+  return { year:d.getFullYear(), month:d.getMonth()+1, quarter:Math.floor(d.getMonth()/3)+1, half:(d.getMonth()<6?1:2) };
+}
+function yearOptions(sel){
+  var now=new Date().getFullYear(), out='';
+  for(var i=0;i<6;i++){
+    var y=now-i; out+='<option value="'+y+'" '+(String(sel)===String(y)?'selected':'')+'>'+y+'</option>';
+  }
+  return out;
+}
+function periodControlsHtml(prefix){
+  var p=currentPeriod();
+  return '<div class="filters period-filters">'+
+    '<div class="field"><label>الفترة</label><select id="'+prefix+'_mode" onchange="onPeriodModeChange(\''+prefix+'\',true)">'+
+      '<option value="current_month">الشهر الحالي</option>'+
+      '<option value="month">شهر محدد</option>'+
+      '<option value="quarter">ربع السنة</option>'+
+      '<option value="half">نصف السنة</option>'+
+      '<option value="year">السنة كاملة</option>'+
+      '<option value="all">كل السجلات</option>'+
+    '</select></div>'+
+    '<div class="field period-year" id="'+prefix+'_yearWrap"><label>السنة</label><select id="'+prefix+'_year" onchange="periodReload(\''+prefix+'\')">'+yearOptions(p.year)+'</select></div>'+
+    '<div class="field period-month" id="'+prefix+'_monthWrap"><label>الشهر</label><select id="'+prefix+'_month" onchange="periodReload(\''+prefix+'\')">'+
+      AR_MONTHS_UI.map(function(m,i){ return '<option value="'+(i+1)+'" '+(p.month===i+1?'selected':'')+'>'+m+'</option>'; }).join('')+
+    '</select></div>'+
+    '<div class="field period-quarter" id="'+prefix+'_quarterWrap"><label>الربع</label><select id="'+prefix+'_quarter" onchange="periodReload(\''+prefix+'\')">'+
+      '<option value="1">الربع الأول</option><option value="2">الربع الثاني</option><option value="3">الربع الثالث</option><option value="4">الربع الرابع</option>'+
+    '</select></div>'+
+    '<div class="field period-half" id="'+prefix+'_halfWrap"><label>نصف السنة</label><select id="'+prefix+'_half" onchange="periodReload(\''+prefix+'\')">'+
+      '<option value="1">النصف الأول</option><option value="2">النصف الثاني</option>'+
+    '</select></div>'+
+  '</div>';
+}
+function initPeriodControls(prefix){
+  var p=currentPeriod();
+  var q=document.getElementById(prefix+'_quarter'); if(q) q.value=String(p.quarter);
+  var h=document.getElementById(prefix+'_half'); if(h) h.value=String(p.half);
+  onPeriodModeChange(prefix,false);
+}
+function onPeriodModeChange(prefix, reload){
+  var mode=val(prefix+'_mode')||'current_month';
+  function toggle(id,on){ var el=document.getElementById(prefix+'_'+id+'Wrap'); if(el) el.classList.toggle('hidden', !on); }
+  toggle('year', ['month','quarter','half','year'].indexOf(mode)>-1);
+  toggle('month', mode==='month');
+  toggle('quarter', mode==='quarter');
+  toggle('half', mode==='half');
+  if(reload) periodReload(prefix);
+}
+function periodReload(prefix){
+  if(prefix==='fl') loadRecords(true);
+  else if(prefix==='dash') loadDashboard(true);
+}
+function periodFilter(prefix){
+  var p=currentPeriod();
+  var mode=val(prefix+'_mode')||'current_month';
+  return {
+    mode: mode,
+    year: parseInt(val(prefix+'_year'),10)||p.year,
+    month: mode==='current_month' ? p.month : (parseInt(val(prefix+'_month'),10)||p.month),
+    quarter: parseInt(val(prefix+'_quarter'),10)||p.quarter,
+    half: parseInt(val(prefix+'_half'),10)||p.half
+  };
+}
+function periodKey(prefix){ return JSON.stringify(periodFilter(prefix)); }
+
 /* ====================== نموذج التسجيل ====================== */
 function newForm(){
   return { id:null, type:'', type_custom:'', world_day:'', title:'', objective:'',
     target_groups:[], event_date:'', location:'', mechanism:'', mechanisms:[],
     beneficiaries:'', has_partnership:false, partners:[],
-    photos:[], existing_photo_ids:[], photo_folder_id:'', notes:'',
+    photos:[], existing_photo_ids:[], photo_folder_id:'', notes:'', client_request_id:'',
     executor_no:USER.no, executor_name:USER.name };
 }
 function opt(list, sel){
@@ -240,7 +362,7 @@ function renderForm(editing){
         '<label>اسم اليوم العالمي'+reqMark('world_day')+'</label>'+
         '<input type="text" id="f_world" value="'+esc(FORM.world_day)+'" placeholder="مثال: اليوم العالمي لغسل اليدين"></div>'+
       execField+
-      '<div class="field"><label>عنوان الفعالية'+reqMark('title')+'</label>'+
+      '<div class="field '+(FORM.type==='يوم عالمي'?'hidden':'')+'" id="titleWrap"><label>عنوان الفعالية'+reqMark('title')+'</label>'+
         '<input type="text" id="f_title" value="'+esc(FORM.title)+'"></div>'+
       '<div class="field full"><label>الهدف'+reqMark('objective')+'</label>'+
         '<textarea id="f_obj">'+esc(FORM.objective)+'</textarea></div>'+
@@ -309,8 +431,10 @@ function toggleChip(g){
 function onTypeChange(){
   FORM.type=document.getElementById('f_type').value;
   document.getElementById('worldDayWrap').classList.toggle('hidden', FORM.type!=='يوم عالمي');
+  document.getElementById('titleWrap').classList.toggle('hidden', FORM.type==='يوم عالمي');
   document.getElementById('typeOtherWrap').classList.toggle('hidden', FORM.type!=='أخرى');
   if(FORM.type!=='أخرى') FORM.type_custom='';
+  if(FORM.type==='يوم عالمي') FORM.title=FORM.world_day||'';
   saveDraft();
 }
 function mechanismChoicesHtml(){
@@ -404,7 +528,8 @@ function attachAutosave(){
 }
 function collectForm(){
   FORM.type=val('f_type'); FORM.type_custom=FORM.type==='أخرى'?val('f_type_custom'):'';
-  FORM.world_day=val('f_world'); FORM.title=val('f_title');
+  FORM.world_day=val('f_world');
+  FORM.title=FORM.type==='يوم عالمي' ? FORM.world_day : val('f_title');
   FORM.objective=val('f_obj'); FORM.event_date=val('f_date'); FORM.location=val('f_loc');
   FORM.mechanisms=FORM.mechanisms||[];
   FORM.mechanism=FORM.mechanisms.join(' ، ');
@@ -437,27 +562,49 @@ function clearDraft(){ try{ localStorage.removeItem(draftKey()); localStorage.re
 
 /* ====================== حفظ (محلي أولًا ثم الخادم) ====================== */
 function submitForm(){
+  if(SUBMITTING) return;
   collectForm();
   var miss=missingFormFields();
   if(miss.length){ showValidationErrors(miss); return; }
   clearValidationErrors();
 
+  var isEdit=!!FORM.id && !FORM._new_unsaved;
+  if(!FORM.id){ FORM.id=makeId('ACT'); FORM._new_unsaved=true; }
+  FORM.client_request_id=FORM.client_request_id||makeId('REQ');
   var payload=Object.assign({},FORM);
   payload._actor_no=USER.no;
+  payload._was_edit=isEdit;
+  var okMsg=isEdit?'تم حفظ التعديل بنجاح.':'تم حفظ الفعالية بنجاح.';
   var btn=document.getElementById('saveBtn');
+  SUBMITTING=true;
   btn.disabled=true; btn.textContent='جارٍ الحفظ…';
 
   if(Outbox.available){
+    if(Outbox.setActive) Outbox.setActive(payload,true);
     // 1) حفظ محلي فوري  2) محاولة الرفع
     Outbox.add(payload).then(function(localId){
       clearDraft(); updatePending();
       run('saveActivity', payload, USER.no).then(function(r){
-        if(r && r.ok){ Outbox.remove(localId).then(function(){ onSaved('تم حفظ الفعالية بنجاح.'); }); }
-        else { onSavedLocal(); }
-      }).catch(function(){ onSavedLocal(); });
-    }).catch(function(){ directSave(payload,btn); });
+        if(r && r.ok){
+          Outbox.remove(localId).then(function(){
+            if(Outbox.setActive) Outbox.setActive(payload,false);
+            onSaved(okMsg);
+          });
+        }
+        else {
+          if(Outbox.setActive) Outbox.setActive(payload,false);
+          onSavedLocal();
+        }
+      }).catch(function(){
+        if(Outbox.setActive) Outbox.setActive(payload,false);
+        onSavedLocal();
+      });
+    }).catch(function(){
+      if(Outbox.setActive) Outbox.setActive(payload,false);
+      directSave(payload,btn,okMsg);
+    });
   } else {
-    directSave(payload,btn);
+    directSave(payload,btn,okMsg);
   }
 }
 function missingFormFields(){
@@ -466,8 +613,11 @@ function missingFormFields(){
   function has(v){ return String(v==null?'':v).trim()!==''; }
   if(!has(FORM.type)) add('type','f_type');
   if(FORM.type==='أخرى' && !has(FORM.type_custom)) add('type_custom','f_type_custom');
-  if(FORM.type==='يوم عالمي' && isRequiredField('world_day') && !has(FORM.world_day)) add('world_day','f_world');
-  if(!has(FORM.title)) add('title','f_title');
+  if(FORM.type==='يوم عالمي'){
+    if(!has(FORM.world_day)) add('world_day','f_world');
+  } else if(!has(FORM.title)) {
+    add('title','f_title');
+  }
   if(isRequiredField('objective') && !has(FORM.objective)) add('objective','f_obj');
   if(!has(FORM.event_date)) add('event_date','f_date');
   if(!has(FORM.executor_no)) add('executor_no', USER.role==='admin'?'f_exec':'whoName');
@@ -505,17 +655,20 @@ function showValidationErrors(miss){
   }
   toast('حقول ناقصة: '+miss.map(function(m){ return m.label; }).join('، '),'err');
 }
-function directSave(payload,btn){
+function directSave(payload,btn,okMsg){
+  var fallbackLabel=(payload && payload._was_edit)?'حفظ التعديلات':'حفظ الفعالية';
   run('saveActivity',payload,USER.no).then(function(r){
-    if(r&&r.ok){ clearDraft(); onSaved('تم حفظ الفعالية بنجاح.'); }
-    else { btn.disabled=false; btn.textContent='حفظ الفعالية'; toast((r&&r.msg)||'تعذّر الحفظ.','err'); }
+    if(r&&r.ok){ clearDraft(); onSaved(okMsg||'تم الحفظ بنجاح.'); }
+    else { SUBMITTING=false; btn.disabled=false; btn.textContent=fallbackLabel; toast((r&&r.msg)||'تعذّر الحفظ.','err'); }
   }).catch(function(){
-    btn.disabled=false; btn.textContent='حفظ الفعالية';
+    SUBMITTING=false;
+    btn.disabled=false; btn.textContent=fallbackLabel;
     toast('انقطع الاتصال. بياناتك محفوظة كمسودة، أعد المحاولة.','err');
   });
 }
-function onSaved(msg){ invalidateCaches(); updatePending(); toast(msg,'ok'); show('records'); }
+function onSaved(msg){ SUBMITTING=false; if(FORM) FORM._new_unsaved=false; invalidateCaches(); updatePending(); toast(msg,'ok'); show('records'); }
 function onSavedLocal(){ invalidateCaches(); updatePending();
+  SUBMITTING=false;
   toast('حُفظت محليًا وستُرفع تلقائيًا عند توفّر الاتصال.','ok'); show('records'); }
 
 function resetForm(){
@@ -526,31 +679,30 @@ function resetForm(){
 
 /* ====================== السجل ====================== */
 function renderRecords(){
-  var years=[]; var y=new Date().getFullYear();
-  for(var i=0;i<4;i++) years.push(y-i);
-  var months=['','يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
   document.getElementById('view').innerHTML=
   '<div class="card">'+
     '<h2>سجل الفعاليات</h2>'+
     '<p class="sub">'+(USER.role==='admin'?'جميع الفعاليات المسجّلة.':'فعالياتك المسجّلة.')+'</p>'+
-    '<div class="filters">'+
-      '<div class="field"><label>السنة</label><select id="fl_year" onchange="loadRecords(true)">'+
-        '<option value="">الكل</option>'+years.map(function(yy){return '<option value="'+yy+'">'+yy+'</option>';}).join('')+'</select></div>'+
-      '<div class="field"><label>الشهر</label><select id="fl_month" onchange="loadRecords(true)">'+
-        '<option value="">الكل</option>'+months.map(function(m,i){return i?'<option value="'+i+'">'+m+'</option>':'';}).join('')+'</select></div>'+
+    periodControlsHtml('fl')+
+    '<div class="filters action-filters">'+
       '<div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadRecords(true)">تحديث</button></div>'+
+      '<div class="field" style="justify-content:flex-end"><button class="btn btn-excel btn-sm" id="excelBtn" onclick="exportExcel()">تصدير Excel</button></div>'+
     '</div>'+
     '<div id="recList"><div class="loading"><span class="spin"></span> جارٍ التحميل…</div></div>'+
   '</div>';
+  initPeriodControls('fl');
   loadRecords();
 }
 function loadRecords(force){
-  var year=val('fl_year'), month=val('fl_month');
-  var key=(year||'')+'|'+(month||'');
+  var filter=periodFilter('fl');
+  var key=periodKey('fl');
   if(!force && REC_CACHE[key]){ paintRecords(REC_CACHE[key]); return; }
   document.getElementById('recList').innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
-  run('getActivities', USER.no, year, month).then(function(list){
+  run('getActivities', USER.no, filter).then(function(list){
     REC_CACHE[key]=list; paintRecords(list);
+  }).catch(function(e){
+    var box=document.getElementById('recList');
+    if(box) box.innerHTML='<div class="empty">تعذّر تحميل السجل: '+esc((e&&e.message)||'خطأ غير معروف')+'<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadRecords(true)">إعادة المحاولة</button></div>';
   });
 }
 function paintRecords(list){
@@ -559,18 +711,29 @@ function paintRecords(list){
   window._recs={};
   box.innerHTML=list.map(function(o){
     window._recs[o.id]=o;
-    var typeLabel=o.type==='يوم عالمي'&&o.world_day?((o.display_type||o.type)+' — '+o.world_day):(o.display_type||o.type);
-    return '<div class="rec"><div class="meta">'+
-      '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
-      '<div class="row2">'+
-        '<span class="badge">'+esc(typeLabel)+'</span>'+
-        '<span>التاريخ: '+esc(o.event_date)+'</span>'+
-        (USER.role==='admin'?'<span>المنفّذة: '+esc(o.executor_name)+'</span>':'')+
-        (o.beneficiaries?'<span>المستفيدون: '+esc(o.beneficiaries)+'</span>':'')+
-        (o.photo_ids.length?'<span>'+o.photo_ids.length+' صورة</span>':'')+
-        ((o.has_partnership===true||o.has_partnership==='true')?'<span class="badge part">شراكة</span>':'')+
-      '</div></div>'+
+    var typeLabel=o.display_type||o.type;
+    var firstId=(o.photo_ids&&o.photo_ids.length)?o.photo_ids[0]:'';
+    var thumb=firstId
+      ? '<div class="rec-thumb" onclick="viewActivity(\''+o.id+'\')"><img loading="lazy" src="https://drive.google.com/thumbnail?id='+firstId+'&sz=w300">'+
+        (o.photo_ids.length>1?'<span class="rec-thumb-count">'+o.photo_ids.length+'</span>':'')+'</div>'
+      : '<div class="rec-thumb rec-thumb-empty" onclick="viewActivity(\''+o.id+'\')"><span>لا صور</span></div>';
+    return '<div class="rec">'+
+      thumb+
+      '<div class="meta">'+
+        '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
+        '<div class="row2">'+
+          '<span class="badge">'+esc(typeLabel)+'</span>'+
+          ((o.has_partnership===true||o.has_partnership==='true')?'<span class="badge part">شراكة</span>':'')+
+        '</div>'+
+        '<div class="rec-facts">'+
+          '<span class="fact"><i>التاريخ</i>'+esc(o.event_date)+'</span>'+
+          (USER.role==='admin'?'<span class="fact"><i>المنفّذة</i>'+esc(o.executor_name)+'</span>':'')+
+          (o.beneficiaries?'<span class="fact"><i>المستفيدون</i>'+esc(o.beneficiaries)+'</span>':'')+
+          (o.photo_ids.length?'<span class="fact"><i>الصور</i>'+o.photo_ids.length+'</span>':'')+
+        '</div>'+
+      '</div>'+
       '<div class="ops">'+
+        '<button class="btn btn-view btn-sm" onclick="viewActivity(\''+o.id+'\')"><span class="ico">◉</span> عرض</button>'+
         '<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>'+
         (USER.role==='admin'?'<button class="btn btn-print btn-sm" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⎙</span> طباعة PDF</button>':'')+
         '<button class="btn btn-danger-outline btn-sm" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>'+
@@ -581,12 +744,15 @@ function paintRecords(list){
 function viewActivity(id){
   var o=window._recs[id]; if(!o) return;
   var photos=(o.photo_ids||[]).map(function(pid){
-    return '<div class="photo-thumb"><a href="https://drive.google.com/file/d/'+pid+'/view" target="_blank">'+
-      '<img loading="lazy" src="https://drive.google.com/thumbnail?id='+pid+'&sz=w200"></a></div>';
+    var i=(o.photo_ids||[]).indexOf(pid);
+    return '<button class="photo-thumb photo-open" onclick="openPhotoViewer(window._recs[\''+id+'\'].photo_ids,'+i+',\''+escAttr(o.title)+'\')">'+
+      '<img loading="lazy" src="https://drive.google.com/thumbnail?id='+pid+'&sz=w300"></button>';
   }).join('');
+  var typeLabel=o.display_type||o.type;
+  var titleLabel=o.type==='يوم عالمي'?'اسم اليوم العالمي':'العنوان';
   var body=
-    dl('النوع', o.type==='يوم عالمي'&&o.world_day?((o.display_type||o.type)+' — '+o.world_day):(o.display_type||o.type))+
-    dl('العنوان', o.title)+ dl('الهدف', o.objective)+ dl('الفئة المستهدفة', o.target_groups)+
+    dl('النوع', typeLabel)+
+    dl(titleLabel, o.title)+ dl('الهدف', o.objective)+ dl('الفئة المستهدفة', o.target_groups)+
     dl('تاريخ التنفيذ', o.event_date+' · '+o.month_name+' · '+o.quarter)+
     dl('المكان', o.location)+ dl('آلية التنفيذ', o.mechanism)+
     dl('عدد المستفيدين', o.beneficiaries)+ dl('المنفّذة', o.executor_name)+
@@ -596,6 +762,31 @@ function viewActivity(id){
   openModal(o.title, body,
     '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
     '<button class="btn btn-primary" onclick="closeModal();editActivity(\''+id+'\')">تعديل</button>');
+}
+function openPhotoViewer(ids,index,title){
+  PHOTO_VIEW={ ids:(ids||[]).slice(), index:index||0, title:title||'الصور' };
+  paintPhotoViewer();
+}
+function movePhoto(step){
+  if(!PHOTO_VIEW.ids.length) return;
+  PHOTO_VIEW.index=(PHOTO_VIEW.index+step+PHOTO_VIEW.ids.length)%PHOTO_VIEW.ids.length;
+  paintPhotoViewer();
+}
+function paintPhotoViewer(){
+  var ids=PHOTO_VIEW.ids||[];
+  var pid=ids[PHOTO_VIEW.index];
+  if(!pid) return;
+  var body='<div class="photo-viewer">'+
+    '<img src="https://drive.google.com/thumbnail?id='+escAttr(pid)+'&sz=w1600" alt="صورة الفعالية">'+
+    '<div class="photo-count">'+(PHOTO_VIEW.index+1)+' / '+ids.length+'</div>'+
+  '</div>';
+  var nav=ids.length>1
+    ? '<button class="btn btn-ghost" onclick="movePhoto(-1)">السابق</button><button class="btn btn-ghost" onclick="movePhoto(1)">التالي</button>'
+    : '';
+  openModal(PHOTO_VIEW.title||'الصور', body,
+    '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
+    nav+
+    '<a class="btn btn-primary" target="_blank" rel="noopener" href="https://drive.google.com/file/d/'+escAttr(pid)+'/view">فتح الأصل</a>');
 }
 function editActivity(id){
   var o=window._recs[id]; if(!o) return;
@@ -640,18 +831,71 @@ function exportPdf(id){
     toast((e&&e.message)||'تعذّر إنشاء PDF.','err');
   });
 }
+function exportExcel(){
+  var btn=document.getElementById('excelBtn');
+  if(btn){ btn.disabled=true; btn.textContent='جارٍ التصدير…'; }
+  toast('جارٍ إنشاء ملف Excel…');
+  run('exportActivitiesExcel', periodFilter('fl'), USER.no).then(function(r){
+    if(btn){ btn.disabled=false; btn.textContent='تصدير Excel'; }
+    if(r&&r.ok){
+      toast('تم إنشاء ملف Excel.','ok');
+      triggerDownload(r.downloadUrl||r.url, r.name||'athar.xlsx');
+      openModal('تم إنشاء Excel',
+        '<p style="margin:0 0 10px">تم إنشاء تقرير Excel للفترة: '+esc(r.period||'')+'</p>'+
+        '<div class="hint">عدد السجلات: '+esc(r.count||0)+' · '+esc(r.name||'تقرير Excel')+'</div>',
+        '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
+        '<a class="btn btn-ghost" target="_blank" rel="noopener" href="'+escAttr(r.url)+'">فتح الملف</a>'+
+        '<a class="btn btn-excel" target="_blank" rel="noopener" href="'+escAttr(r.downloadUrl||r.url)+'">تحميل Excel</a>');
+    } else {
+      toast((r&&r.msg)||'تعذّر إنشاء Excel.','err');
+    }
+  }).catch(function(e){
+    if(btn){ btn.disabled=false; btn.textContent='تصدير Excel'; }
+    toast((e&&e.message)||'تعذّر إنشاء Excel.','err');
+  });
+}
+function triggerDownload(url,name){
+  if(!url) return;
+  try{
+    var a=document.createElement('a');
+    a.href=url; a.download=name||''; a.target='_blank'; a.rel='noopener';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); }, 100);
+  }catch(e){}
+}
 
 /* ====================== لوحة المؤشرات ====================== */
 function renderDashboard(){
-  document.getElementById('view').innerHTML='<div class="card"><div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div></div>';
-  if(DASH_CACHE){ paintDash(DASH_CACHE); return; }
-  run('getDashboard', USER.no).then(function(d){ DASH_CACHE=d; paintDash(d); });
+  document.getElementById('view').innerHTML=
+    '<div class="card">'+
+      '<h2>المؤشرات العامة</h2>'+
+      '<p class="sub">'+(USER.role==='admin'?'ملخّص الفعاليات حسب الفترة المختارة.':'ملخّص فعالياتك حسب الفترة المختارة.')+'</p>'+
+      periodControlsHtml('dash')+
+      '<div class="filters action-filters"><div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadDashboard(true)">تحديث</button></div></div>'+
+      '<div id="dashBody"><div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div></div>'+
+    '</div>';
+  initPeriodControls('dash');
+  loadDashboard();
+}
+function loadDashboard(force){
+  var key=periodKey('dash');
+  var body=document.getElementById('dashBody');
+  if(!force && DASH_CACHE[key]){ paintDash(DASH_CACHE[key]); return; }
+  if(body) body.innerHTML='<div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div>';
+  run('getDashboard', USER.no, periodFilter('dash')).then(function(d){
+    DASH_CACHE[key]=d; paintDash(d);
+  }).catch(function(e){
+    var v=document.getElementById('dashBody');
+    if(v) v.innerHTML='<div class="empty">تعذّر تحميل المؤشرات: '+esc((e&&e.message)||'خطأ غير معروف')+'<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadDashboard(true)">إعادة المحاولة</button></div>';
+  });
 }
 function paintDash(d){
-  document.getElementById('view').innerHTML=
-  '<div class="card">'+
-    '<h2>المؤشرات العامة</h2>'+
-    '<p class="sub">'+(USER.role==='admin'?'ملخّص جميع الفعاليات.':'ملخّص فعالياتك.')+'</p>'+
+  d = d || {};
+  d.byType = d.byType || {}; d.byMechanism = d.byMechanism || {};
+  d.byMonth = d.byMonth || {}; d.byHalf = d.byHalf || {};
+  d.byQuarter = d.byQuarter || {}; d.byExecutor = d.byExecutor || {};
+  var host=document.getElementById('dashBody')||document.getElementById('view');
+  host.innerHTML=
     '<div class="kpis">'+
       kpi(d.total,'إجمالي الفعاليات')+ kpi(d.beneficiaries,'إجمالي المستفيدين')+
       kpi(d.partnerships,'فعاليات بشراكات')+ kpi(Object.keys(d.byType).length,'أنواع مختلفة')+
@@ -662,8 +906,7 @@ function paintDash(d){
     dashBlock('التوزيع حسب نصف السنة', d.byHalf, 'half')+
     dashBlock('التوزيع حسب الربع', d.byQuarter, 'quarter', 'الربع الأول: يناير-مارس، الثاني: أبريل-يونيو، الثالث: يوليو-سبتمبر، الرابع: أكتوبر-ديسمبر. شهر يونيو يقع في الربع الثاني والنصف الأول.')+
     (USER.role==='admin'?dashBlock('حسب المنفّذة', d.byExecutor, 'executor'):'')+
-    '<div id="dashDetails"></div>'+
-  '</div>';
+    '<div id="dashDetails"></div>';
 }
 function kpi(n,l){ return '<div class="kpi"><div class="n">'+(n||0)+'</div><div class="l">'+l+'</div></div>'; }
 function dashBlock(title,obj,dimension,hint){
@@ -684,7 +927,7 @@ function showDashItems(dimension,key){
   var box=document.getElementById('dashDetails');
   if(!box) return;
   box.innerHTML='<div class="section-divider"></div><div class="loading"><span class="spin"></span> جارٍ جلب الأنشطة…</div>';
-  run('getDashboardItems',USER.no,dimension,key).then(function(list){
+  run('getDashboardItems',USER.no,dimension,key,periodFilter('dash')).then(function(list){
     if(!list.length){
       box.innerHTML='<div class="section-divider"></div><div class="empty">لا توجد أنشطة لهذا الاختيار.</div>';
       return;
@@ -699,7 +942,7 @@ function showDashItems(dimension,key){
 }
 function clearDashItems(){ var box=document.getElementById('dashDetails'); if(box) box.innerHTML=''; }
 function miniRecord(o){
-  var typeLabel=o.type==='يوم عالمي'&&o.world_day?((o.display_type||o.type)+' — '+o.world_day):(o.display_type||o.type);
+  var typeLabel=o.display_type||o.type;
   return '<div class="mini-rec"><b>'+esc(o.title)+'</b><span>'+esc(typeLabel||'')+'</span><span>'+esc(o.event_date||'')+'</span>'+
     (USER.role==='admin'?'<span>'+esc(o.executor_name||'')+'</span>':'')+'</div>';
 }
@@ -720,8 +963,8 @@ function renderAdmin(){
     requiredFieldsBlock()+
   '</div>'+
   '<div class="card"><h2>التصدير</h2>'+
-    '<p class="sub">تصدير PDF متاح من زر PDF داخل سجل الفعاليات. تصدير Excel سيُفعّل عند إضافة قالب Excel الرسمي.</p>'+
-    '<button class="btn btn-ghost" disabled>Excel بانتظار القالب</button>'+
+    '<p class="sub">تصدير PDF متاح من زر PDF داخل سجل الفعاليات، وتصدير Excel متاح من السجل حسب الفترة المختارة.</p>'+
+    '<button class="btn btn-excel" onclick="show(\'records\')">الانتقال للسجل</button>'+
   '</div>';
 }
 function requiredFieldsBlock(){
@@ -816,4 +1059,6 @@ function dl(k,v){ if(v==null||v==='') return ''; return '<div class="dl-row"><sp
 function nowTime(){ var d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
 function isoDate(s){ if(!s) return ''; var p=String(s).split('/'); if(p.length===3) return p[0]+'-'+('0'+p[1]).slice(-2)+'-'+('0'+p[2]).slice(-2); return s; }
 function splitList(s){ return String(s||'').split(/[،,]/).map(function(x){return x.trim();}).filter(Boolean); }
+
 </script>
+

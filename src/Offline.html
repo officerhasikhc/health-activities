@@ -7,6 +7,8 @@
 var Outbox = (function () {
   var DB = 'atharDB', STORE = 'outbox', VER = 1;
   var ready = open();
+  var active = {};
+  var flushing = false;
 
   function open() {
     return new Promise(function (res, rej) {
@@ -50,19 +52,39 @@ var Outbox = (function () {
   }
   function remove(localId) {
     return tx('readwrite').then(function (st) {
-      return new Promise(function (res) { st.delete(localId).onsuccess = function () { res(); }; });
+      return new Promise(function (res) {
+        var r = st.delete(localId);
+        r.onsuccess = function () { res(); };
+        r.onerror = function () { res(); };
+      });
     });
   }
   function count() { return all().then(function (a) { return a.length; }); }
 
+  function requestKey(payload) {
+    payload = payload || {};
+    return String(payload.client_request_id || payload.id || '').trim();
+  }
+  function setActive(payload, on) {
+    var key = requestKey(payload);
+    if (!key) return;
+    if (on) active[key] = true;
+    else delete active[key];
+  }
+
   // محاولة رفع كل العناصر المعلّقة إلى الخادم
   function flush() {
     if (!navigator.onLine) return Promise.resolve({ sent: 0, pending: 0 });
+    if (flushing) return count().then(function (p) { return { sent: 0, pending: p }; });
+    flushing = true;
     return all().then(function (items) {
       var sent = 0;
       var chain = Promise.resolve();
       items.forEach(function (it) {
         chain = chain.then(function () {
+          var key = requestKey(it.payload);
+          if (key && active[key]) return null;
+          setActive(it.payload, true);
           return run('saveActivity', it.payload, it.payload._actor_no || it.payload.created_by_no || it.payload.executor_no)
             .then(function (r) {
               if (r && r.ok) {
@@ -71,16 +93,26 @@ var Outbox = (function () {
             })
             .catch(function () {
               return null;
+            })
+            .then(function (r) {
+              setActive(it.payload, false);
+              return r;
             });
         });
       });
       return chain.then(function () {
         return count().then(function (p) { return { sent: sent, pending: p }; });
       });
+    }).then(function (r) {
+      flushing = false;
+      return r;
+    }).catch(function (e) {
+      flushing = false;
+      throw e;
     });
   }
 
-  return { add: add, all: all, remove: remove, count: count, flush: flush, available: !!window.indexedDB };
+  return { add: add, all: all, remove: remove, count: count, flush: flush, setActive: setActive, available: !!window.indexedDB };
 })();
 
 // إعادة المحاولة تلقائيًا عند عودة الاتصال
@@ -88,6 +120,29 @@ window.addEventListener('online', function () {
   toast('عاد الاتصال — جارٍ رفع المحفوظ محليًا…');
   syncOutbox();
 });
+
+// رفع تلقائي عند عودة التطبيق للواجهة (مهم لـ iOS الذي لا يدعم Background Sync)
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && navigator.onLine) syncOutbox();
+});
+window.addEventListener('focus', function () {
+  if (navigator.onLine) syncOutbox();
+});
+
+// عند طلب Service Worker المزامنة في الخلفية
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', function (e) {
+    if (e.data && e.data.type === 'athar-sync') syncOutbox();
+  });
+}
+
+// تسجيل Background Sync عند توفّره (Chrome/أندرويد) لرفع المحفوظ حتى بعد إغلاق التطبيق
+function registerBackgroundSync() {
+  if (!('serviceWorker' in navigator) || !('SyncManager' in window)) return;
+  navigator.serviceWorker.ready.then(function (reg) {
+    if (reg.sync) reg.sync.register('athar-outbox').catch(function () {});
+  }).catch(function () {});
+}
 
 function syncOutbox() {
   if (!Outbox.available) return;
@@ -104,9 +159,12 @@ function updatePending() {
   if (!Outbox.available) return;
   Outbox.count().then(function (n) {
     var el = document.getElementById('pending');
+    if (n > 0) registerBackgroundSync();
     if (!el) return;
     if (n > 0) { el.textContent = 'بانتظار الرفع: ' + n; el.classList.remove('hidden'); }
     else el.classList.add('hidden');
   });
 }
+
 </script>
+

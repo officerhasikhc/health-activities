@@ -8,8 +8,23 @@
    ============================================================ */
 (function () {
   var MAX = 400;
-  var buf = [];
   var DEBUG_KEY = 'athar_debug';
+  var DEBUG_LOG_KEY = 'athar_debug_log';
+  var buf = loadStoredLogs();
+
+  function loadStoredLogs() {
+    try {
+      var raw = localStorage.getItem(DEBUG_LOG_KEY);
+      var parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.slice(-MAX) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function persistLogs() {
+    try { localStorage.setItem(DEBUG_LOG_KEY, JSON.stringify(buf.slice(-MAX))); } catch (e) {}
+  }
 
   function nowStr() {
     var d = new Date();
@@ -30,6 +45,7 @@
     var line = '[' + nowStr() + '] [' + level + ']' + (tag ? ' (' + tag + ')' : '') + ' ' + text;
     buf.push(line);
     if (buf.length > MAX) buf.shift();
+    persistLogs();
     if (tag === 'bridge' && /^(fetch ->|طلب)/.test(text)) lastAction = text;
     refreshPanel();
     maybeReport(level, tag, text);
@@ -128,9 +144,13 @@
 
   /* ---------------- لوحة السجل + Eruda ---------------- */
   var panel, logArea;
+  var erudaVisible = false;
 
   function refreshPanel() {
-    if (logArea) logArea.value = buf.join('\n');
+    if (logArea) {
+      logArea.value = buf.join('\n');
+      logArea.scrollTop = logArea.scrollHeight;
+    }
   }
 
   function copyLogs() {
@@ -145,6 +165,23 @@
     var text = buf.join('\n');
     if (navigator.share) navigator.share({ title: 'سجل أثر', text: text }).catch(function () {});
     else copyLogs();
+  }
+
+  function clearLogs() {
+    buf.length = 0;
+    persistLogs();
+    refreshPanel();
+    flash('تم مسح السجل');
+  }
+
+  function toggleEruda() {
+    if (!window.eruda) { flash('Eruda غير جاهز'); return; }
+    try {
+      if (erudaVisible) { eruda.hide(); erudaVisible = false; flash('تم إخفاء Eruda'); }
+      else { eruda.show(); erudaVisible = true; flash('تم عرض Eruda'); }
+    } catch (e) {
+      eruda.show(); erudaVisible = true;
+    }
   }
 
   function selectArea() {
@@ -188,10 +225,10 @@
     var head = document.createElement('div');
     head.style.cssText = 'display:flex;gap:6px;padding:8px;border-bottom:1px solid #2a4750;align-items:center';
     head.innerHTML =
-      '<b style="color:#fff;font-family:sans-serif">سجل أثر</b>' +
+      '<b style="color:#fff;font-family:sans-serif">سجل التشخيص</b>' +
       '<span id="athar-dbg-flash" style="margin-inline-start:auto;color:#7fd1a0;font-family:sans-serif;opacity:0;transition:.2s"></span>';
-    head.appendChild(mkIcon('⤢', 'تكبير/تصغير', function () { sizeMode = (sizeMode === 'max' ? 'normal' : 'max'); applySize(); }));
-    head.appendChild(mkIcon('—', 'تصغير', closePanel));
+    head.appendChild(mkIcon('⤢', 'تكبير/تصغير اللوحة', function () { sizeMode = (sizeMode === 'max' ? 'normal' : 'max'); applySize(); }));
+    head.appendChild(mkIcon('−', 'إخفاء اللوحة مع حفظ السجل', closePanel));
     panel.appendChild(head);
 
     logArea = document.createElement('textarea');
@@ -203,8 +240,8 @@
     bar.style.cssText = 'display:flex;gap:6px;padding:8px;border-top:1px solid #2a4750';
     bar.appendChild(mkBtn('نسخ', copyLogs));
     bar.appendChild(mkBtn('مشاركة', shareLogs));
-    bar.appendChild(mkBtn('مسح', function () { buf.length = 0; refreshPanel(); }));
-    bar.appendChild(mkBtn('Eruda', function () { window.eruda && eruda.show(); }));
+    bar.appendChild(mkBtn('مسح السجل', clearLogs));
+    bar.appendChild(mkBtn('Eruda', toggleEruda));
     panel.appendChild(bar);
     document.body.appendChild(panel);
   }

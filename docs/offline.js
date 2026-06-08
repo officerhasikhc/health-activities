@@ -6,6 +6,8 @@
 var Outbox = (function () {
   var DB = 'atharDB', STORE = 'outbox', VER = 1;
   var ready = open();
+  var active = {};
+  var flushing = false;
 
   function open() {
     return new Promise(function (res, rej) {
@@ -49,19 +51,39 @@ var Outbox = (function () {
   }
   function remove(localId) {
     return tx('readwrite').then(function (st) {
-      return new Promise(function (res) { st.delete(localId).onsuccess = function () { res(); }; });
+      return new Promise(function (res) {
+        var r = st.delete(localId);
+        r.onsuccess = function () { res(); };
+        r.onerror = function () { res(); };
+      });
     });
   }
   function count() { return all().then(function (a) { return a.length; }); }
 
+  function requestKey(payload) {
+    payload = payload || {};
+    return String(payload.client_request_id || payload.id || '').trim();
+  }
+  function setActive(payload, on) {
+    var key = requestKey(payload);
+    if (!key) return;
+    if (on) active[key] = true;
+    else delete active[key];
+  }
+
   // محاولة رفع كل العناصر المعلّقة إلى الخادم
   function flush() {
     if (!navigator.onLine) return Promise.resolve({ sent: 0, pending: 0 });
+    if (flushing) return count().then(function (p) { return { sent: 0, pending: p }; });
+    flushing = true;
     return all().then(function (items) {
       var sent = 0;
       var chain = Promise.resolve();
       items.forEach(function (it) {
         chain = chain.then(function () {
+          var key = requestKey(it.payload);
+          if (key && active[key]) return null;
+          setActive(it.payload, true);
           return run('saveActivity', it.payload, it.payload._actor_no || it.payload.created_by_no || it.payload.executor_no)
             .then(function (r) {
               if (r && r.ok) {
@@ -70,16 +92,26 @@ var Outbox = (function () {
             })
             .catch(function () {
               return null;
+            })
+            .then(function (r) {
+              setActive(it.payload, false);
+              return r;
             });
         });
       });
       return chain.then(function () {
         return count().then(function (p) { return { sent: sent, pending: p }; });
       });
+    }).then(function (r) {
+      flushing = false;
+      return r;
+    }).catch(function (e) {
+      flushing = false;
+      throw e;
     });
   }
 
-  return { add: add, all: all, remove: remove, count: count, flush: flush, available: !!window.indexedDB };
+  return { add: add, all: all, remove: remove, count: count, flush: flush, setActive: setActive, available: !!window.indexedDB };
 })();
 
 // إعادة المحاولة تلقائيًا عند عودة الاتصال
