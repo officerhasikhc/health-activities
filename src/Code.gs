@@ -7,7 +7,7 @@
  */
 
 // ============================ إعدادات عامة ============================
-var APP_NAME = 'أثر';
+var APP_NAME = 'منصة أثر للمبادرات الصحية';
 var SHEET_NAME = 'أثر - قاعدة بيانات الفعاليات';
 var PHOTO_ROOT_NAME = 'أثر - صور الفعاليات';
 var PROP = PropertiesService.getScriptProperties();
@@ -33,10 +33,15 @@ var LIST_SEP = ' ، ';
 var OTHER_VALUE = 'أخرى';
 var OFFICIAL_LETTER_NAME = 'officiallyletter.jpg';
 var REPORT_ROOT_NAME = 'أثر - تقارير PDF';
+var APP_LOGO_NAME = 'logo.png';
+var LOGIN_LOGO_NAME = 'logo-login.png';
 
 // ============================ نقطة الدخول ============================
 function doGet() {
-  return HtmlService.createTemplateFromFile('Index')
+  var t = HtmlService.createTemplateFromFile('Index');
+  t.APP_LOGO_URI = getAssetDataUri_(APP_LOGO_NAME);
+  t.LOGIN_LOGO_URI = getAssetDataUri_(LOGIN_LOGO_NAME);
+  return t
     .evaluate()
     .setTitle(APP_NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')
@@ -45,6 +50,26 @@ function doGet() {
 
 function include(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
+}
+
+function getAssetDataUri_(name) {
+  try {
+    var propKey = 'ASSET_' + name.replace(/[^A-Za-z0-9]/g, '_').toUpperCase() + '_ID';
+    var fileId = PROP.getProperty(propKey);
+    var file;
+    if (fileId) {
+      try { file = DriveApp.getFileById(fileId); } catch (e) { file = null; }
+    }
+    if (!file) {
+      var files = DriveApp.getFilesByName(name);
+      if (!files.hasNext()) return '';
+      file = files.next();
+      PROP.setProperty(propKey, file.getId());
+    }
+    return blobDataUri_(file.getBlob());
+  } catch (e2) {
+    return '';
+  }
 }
 
 // ============================ التهيئة الأولى ============================
@@ -473,6 +498,15 @@ function findRowById_(sh, id) {
 
 function getActivities(empNo, year, month) {
   var user = requireActiveUser_(empNo);
+  var rows = getVisibleActivityRows_(user);
+  if (year) rows = rows.filter(function(o){ return String(o.year)===String(year); });
+  if (month) rows = rows.filter(function(o){ return String(o.month)===String(month); });
+
+  rows.sort(function(a,b){ return new Date(b.event_date) - new Date(a.event_date); });
+  return rows.map(activityClientRow_);
+}
+
+function getVisibleActivityRows_(user) {
   var sh = activitiesSheet_();
   if (sh.getLastRow() < 2) return [];
   var data = sh.getDataRange().getValues();
@@ -480,30 +514,26 @@ function getActivities(empNo, year, month) {
   var rows = data.map(function(r){
     var o = {}; head.forEach(function(h,i){ o[h]=r[i]; }); return o;
   }).filter(function(o){ return o.id; });
-
-  // الموظفة ترى سجلها فقط؛ المشرف يرى الكل
   if (user.role !== 'admin') {
-    rows = rows.filter(function(o){ return String(o.executor_no)===String(empNo); });
+    rows = rows.filter(function(o){ return String(o.executor_no)===String(user.emp_no); });
   }
-  if (year) rows = rows.filter(function(o){ return String(o.year)===String(year); });
-  if (month) rows = rows.filter(function(o){ return String(o.month)===String(month); });
+  return rows;
+}
 
-  rows.sort(function(a,b){ return new Date(b.event_date) - new Date(a.event_date); });
-  return rows.map(function(o){
-    var displayType = activityDisplayType_(o);
-    return {
-      id:o.id, type:o.type, type_custom:o.type_custom || '', display_type:displayType,
-      world_day:o.world_day, title:o.title,
-      objective:o.objective, target_groups:o.target_groups,
-      event_date:formatDate_(o.event_date), month_name:o.month_name,
-      quarter:o.quarter, year:o.year, month:o.month,
-      executor_no:o.executor_no, executor_name:o.executor_name, location:o.location,
-      mechanism:o.mechanism, beneficiaries:o.beneficiaries,
-      has_partnership:o.has_partnership, partners:o.partners,
-      notes:o.notes, photo_ids:o.photo_ids ? String(o.photo_ids).split(',').filter(Boolean) : [],
-      photo_folder_id:o.photo_folder_id
-    };
-  });
+function activityClientRow_(o) {
+  var displayType = activityDisplayType_(o);
+  return {
+    id:o.id, type:o.type, type_custom:o.type_custom || '', display_type:displayType,
+    world_day:o.world_day, title:o.title,
+    objective:o.objective, target_groups:o.target_groups,
+    event_date:formatDate_(o.event_date), month_name:o.month_name,
+    quarter:o.quarter, year:o.year, month:o.month,
+    executor_no:o.executor_no, executor_name:o.executor_name, location:o.location,
+    mechanism:o.mechanism, beneficiaries:o.beneficiaries,
+    has_partnership:o.has_partnership, partners:o.partners,
+    notes:o.notes, photo_ids:o.photo_ids ? String(o.photo_ids).split(',').filter(Boolean) : [],
+    photo_folder_id:o.photo_folder_id
+  };
 }
 
 function deleteActivity(id, actorEmpNo) {
@@ -529,35 +559,47 @@ function formatDate_(v) {
 // ============================ لوحة المؤشرات ============================
 function getDashboard(empNo) {
   var user = requireActiveUser_(empNo);
-  var sh = activitiesSheet_();
   var out = { total:0, beneficiaries:0, byType:{}, byMonth:{}, byHalf:{}, byQuarter:{}, byMechanism:{}, partnerships:0, byExecutor:{} };
-  if (sh.getLastRow() < 2) return out;
-  var data = sh.getDataRange().getValues();
-  var head = data.shift();
-  var idx = {}; head.forEach(function(h,i){ idx[h]=i; });
+  var rows = getVisibleActivityRows_(user);
 
-  data.forEach(function(r){
-    if (!r[idx.id]) return;
-    if (user.role !== 'admin' && String(r[idx.executor_no]) !== String(empNo)) return;
+  rows.forEach(function(o){
     out.total++;
-    var b = parseInt(r[idx.beneficiaries],10); if(!isNaN(b)) out.beneficiaries += b;
-    var t = (String(r[idx.type] || '') === OTHER_VALUE && idx.type_custom != null && r[idx.type_custom])
-      ? r[idx.type_custom] : (r[idx.type] || 'غير محدد');
+    var b = parseInt(o.beneficiaries,10); if(!isNaN(b)) out.beneficiaries += b;
+    var t = activityDisplayType_(o) || 'غير محدد';
     out.byType[t] = (out.byType[t]||0)+1;
-    var m = r[idx.month_name] || ''; if(m) out.byMonth[m] = (out.byMonth[m]||0)+1;
-    var monthNo = parseInt(r[idx.month],10);
+    var m = o.month_name || ''; if(m) out.byMonth[m] = (out.byMonth[m]||0)+1;
+    var monthNo = parseInt(o.month,10);
     if (!isNaN(monthNo)) {
       var half = monthNo <= 6 ? 'النصف الأول' : 'النصف الثاني';
       out.byHalf[half] = (out.byHalf[half] || 0) + 1;
     }
-    var q = r[idx.quarter] || ''; if(q) out.byQuarter[q] = (out.byQuarter[q]||0)+1;
-    normalizeList_(r[idx.mechanism]).forEach(function(mech){
+    var q = o.quarter || ''; if(q) out.byQuarter[q] = (out.byQuarter[q]||0)+1;
+    normalizeList_(o.mechanism).forEach(function(mech){
       out.byMechanism[mech] = (out.byMechanism[mech] || 0) + 1;
     });
-    if (r[idx.has_partnership]===true || r[idx.has_partnership]==='true') out.partnerships++;
-    var ex = r[idx.executor_name] || ''; if(ex) out.byExecutor[ex] = (out.byExecutor[ex]||0)+1;
+    if (o.has_partnership===true || o.has_partnership==='true') out.partnerships++;
+    var ex = o.executor_name || ''; if(ex) out.byExecutor[ex] = (out.byExecutor[ex]||0)+1;
   });
   return out;
+}
+
+function getDashboardItems(empNo, dimension, key) {
+  var user = requireActiveUser_(empNo);
+  var rows = getVisibleActivityRows_(user).filter(function(o){
+    if (dimension === 'type') return String(activityDisplayType_(o) || 'غير محدد') === String(key);
+    if (dimension === 'mechanism') return normalizeList_(o.mechanism).indexOf(String(key)) > -1;
+    if (dimension === 'month') return String(o.month_name) === String(key);
+    if (dimension === 'half') {
+      var m = parseInt(o.month,10);
+      return (!isNaN(m) && (m <= 6 ? 'النصف الأول' : 'النصف الثاني') === String(key));
+    }
+    if (dimension === 'quarter') return String(o.quarter) === String(key);
+    if (dimension === 'executor') return String(o.executor_name) === String(key);
+    if (dimension === 'partnership') return o.has_partnership === true || o.has_partnership === 'true';
+    return false;
+  });
+  rows.sort(function(a,b){ return new Date(b.event_date) - new Date(a.event_date); });
+  return rows.map(activityClientRow_);
 }
 
 // ============================ التصدير PDF ============================
@@ -583,7 +625,13 @@ function exportActivityPdf(id, actorEmpNo) {
 
   var outFile = getReportRoot_().createFile(pdf);
   outFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return { ok:true, name:fileName, url:outFile.getUrl(), id:outFile.getId() };
+  return {
+    ok:true,
+    name:fileName,
+    url:outFile.getUrl(),
+    downloadUrl:'https://drive.google.com/uc?export=download&id=' + outFile.getId(),
+    id:outFile.getId()
+  };
 }
 
 function getReportRoot_() {

@@ -10,7 +10,11 @@
   <!-- ===================== شاشة الدخول ===================== -->
   <div id="loginScreen" class="login-wrap">
     <div class="login-card">
-      <div class="brand">أثر</div>
+      <? if (LOGIN_LOGO_URI) { ?>
+        <img class="login-logo" src="<?!= LOGIN_LOGO_URI ?>" alt="شعار وزارة الصحة">
+      <? } ?>
+      <div class="brand">منصة أثر</div>
+      <div class="brand-sub">للمبادرات الصحية</div>
       <div class="org-name">
         المديرية العامة للخدمات الصحية بمحافظة ظفار<br>
         التجمّع الصحي (٢) — مركز صحي حاسك
@@ -18,6 +22,7 @@
       <label style="display:block;text-align:right;margin-bottom:6px">الرقم الوظيفي</label>
       <input id="empNo" type="text" inputmode="numeric" placeholder="••••••" autocomplete="off">
       <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">دخول</button>
+      <button class="btn btn-ghost install-btn" onclick="installApp()">تثبيت التطبيق</button>
       <div class="login-err" id="loginErr"></div>
     </div>
   </div>
@@ -26,12 +31,18 @@
   <div id="app" class="hidden">
     <header class="topbar">
       <div class="topbar-inner">
-        <div class="logo-box">الشعار</div>
+        <div class="logo-box">
+          <? if (APP_LOGO_URI) { ?>
+            <img src="<?!= APP_LOGO_URI ?>" alt="شعار وزارة الصحة">
+          <? } else { ?>
+            الشعار
+          <? } ?>
+        </div>
         <div class="org">
           <h1>المديرية العامة للخدمات الصحية بمحافظة ظفار</h1>
           <p>التجمّع الصحي (٢) — مركز صحي حاسك</p>
         </div>
-        <div class="app-title"><span>منصة</span><strong>أثر</strong></div>
+        <div class="app-title"><span>منصة أثر</span><strong>للمبادرات الصحية</strong></div>
         <div class="topbar-spacer"></div>
         <span id="pending" class="pending hidden"></span>
         <div class="who">

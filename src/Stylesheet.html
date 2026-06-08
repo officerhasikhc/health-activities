@@ -25,15 +25,16 @@
   }
   .topbar-inner{max-width:1080px;margin:0 auto;padding:10px 18px;
     display:flex;align-items:center;gap:14px;position:relative}
-  .logo-box{width:42px;height:42px;border:1px solid rgba(255,255,255,.35);
+  .logo-box{width:52px;height:52px;border:1px solid rgba(255,255,255,.35);
     border-radius:6px;display:flex;align-items:center;justify-content:center;
-    font-size:11px;color:#cfe0e3;flex:0 0 auto;background:rgba(255,255,255,.06)}
+    font-size:11px;color:#cfe0e3;flex:0 0 auto;background:rgba(255,255,255,.92);overflow:hidden}
+  .logo-box img{width:44px;height:44px;object-fit:contain}
   .org h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
   .org p{font-size:12px;margin:2px 0 0;color:#bcd2d6}
   .app-title{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-    display:flex;align-items:baseline;gap:7px;color:#fff;text-align:center;white-space:nowrap}
-  .app-title span{font-size:12px;color:#c9dcdf}
-  .app-title strong{font-size:24px;font-weight:700;letter-spacing:0}
+    display:flex;flex-direction:column;align-items:center;color:#fff;text-align:center;white-space:nowrap;line-height:1.15}
+  .app-title span{font-size:20px;font-weight:700;letter-spacing:0}
+  .app-title strong{font-size:12px;font-weight:500;color:#c9dcdf;letter-spacing:0}
   .topbar-spacer{flex:1}
   .who{font-size:12.5px;text-align:left;color:#dfe9ea}
   .who b{display:block;font-size:13px;color:#fff}
@@ -128,13 +129,21 @@
 
   /* أزرار */
   .btn{border:none;border-radius:6px;padding:9px 18px;font-size:13.5px;cursor:pointer;
-    font-family:inherit;font-weight:600;transition:.15s}
+    font-family:inherit;font-weight:600;transition:.15s;text-decoration:none;display:inline-flex;
+    align-items:center;justify-content:center;gap:6px}
   .btn:disabled{opacity:.55;cursor:not-allowed}
   .btn-primary{background:var(--brand);color:#fff}
   .btn-primary:hover{background:var(--brand-deep)}
   .btn-ghost{background:#fff;color:var(--ink);border:1px solid var(--line-strong)}
   .btn-ghost:hover{background:#f7f9fa}
   .btn-danger{background:var(--err);color:#fff}
+  .btn-edit{background:#e8f2f4;color:var(--brand-deep);border:1px solid #bed6dc}
+  .btn-edit:hover{background:#dcecef}
+  .btn-print{background:#f4efe2;color:#6f5527;border:1px solid #e2d5b7}
+  .btn-print:hover{background:#eee5d3}
+  .btn-danger-outline{background:#fff;color:var(--err);border:1px solid rgba(178,59,59,.45)}
+  .btn-danger-outline:hover{background:#fff4f4;border-color:var(--err)}
+  .ico{font-size:14px;line-height:1}
   .btn-sm{padding:6px 12px;font-size:12.5px}
   .actions{display:flex;gap:10px;justify-content:flex-start;margin-top:6px}
 
@@ -151,7 +160,7 @@
   .badge{display:inline-block;background:#eef2f4;border:1px solid var(--line);
     border-radius:4px;padding:1px 8px;font-size:11.5px;color:var(--brand-deep)}
   .badge.part{background:#f4efe2;border-color:#e3d6b5;color:var(--accent)}
-  .rec .ops{display:flex;gap:6px;flex:0 0 auto}
+  .rec .ops{display:flex;gap:6px;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-start}
   .empty{text-align:center;color:var(--muted);padding:40px 0;font-size:13.5px}
 
   /* لوحة المؤشرات */
@@ -161,11 +170,22 @@
   .kpi .n{font-size:26px;font-weight:700;color:var(--brand-deep)}
   .kpi .l{font-size:12.5px;color:var(--muted);margin-top:2px}
   .bars{margin-top:6px}
+  .dash-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  .dash-head .hint{max-width:620px;text-align:right;line-height:1.7}
   .bar-row{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:12.5px}
+  button.bar-row{width:100%;font-family:inherit;background:none;border:none;padding:0;cursor:pointer;text-align:inherit}
+  button.bar-row:hover .bar-track{outline:2px solid rgba(26,77,92,.12)}
   .bar-row .lbl{width:120px;color:var(--ink);text-align:left;flex:0 0 auto}
   .bar-track{flex:1;background:#eef2f4;border-radius:4px;height:14px;overflow:hidden}
   .bar-fill{height:100%;background:var(--brand);border-radius:4px}
   .bar-row .v{width:30px;color:var(--muted)}
+  .dash-result-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .dash-result-head h3{margin:0;color:var(--brand-deep);font-size:14px}
+  .mini-records{display:grid;gap:8px}
+  .mini-rec{border:1px solid var(--line);border-radius:6px;background:#fff;padding:10px 12px;
+    display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto;gap:8px;align-items:center;font-size:12.5px}
+  .mini-rec b{color:var(--brand-deep)}
+  .mini-rec span{color:var(--muted)}
 
   /* Modal */
   .modal-bg{position:fixed;inset:0;background:rgba(16,34,46,.45);display:flex;
@@ -191,13 +211,17 @@
 
   /* شاشة الدخول */
   .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;
-    background:linear-gradient(135deg,#16424f,#0e2c35);padding:18px}
-  .login-card{background:#fff;border-radius:10px;width:100%;max-width:380px;
-    padding:34px 30px;box-shadow:0 14px 50px rgba(0,0,0,.3);text-align:center}
-  .login-card .brand{font-size:34px;font-weight:700;color:var(--brand);letter-spacing:2px}
-  .login-card .org-name{font-size:12.5px;color:var(--muted);margin:6px 0 24px;line-height:1.7}
+    background:linear-gradient(135deg,#123a46,#1a4d5c 58%,#315b62);padding:18px}
+  .login-card{background:#fff;border-radius:10px;width:100%;max-width:410px;
+    padding:30px 30px 28px;box-shadow:0 14px 50px rgba(0,0,0,.28);text-align:center;
+    border-top:4px solid var(--accent)}
+  .login-logo{width:112px;height:112px;object-fit:contain;margin:0 auto 8px;display:block}
+  .login-card .brand{font-size:27px;font-weight:700;color:var(--brand);letter-spacing:0}
+  .brand-sub{font-size:13px;color:var(--accent);font-weight:600;margin-top:1px}
+  .login-card .org-name{font-size:12.5px;color:var(--muted);margin:10px 0 22px;line-height:1.7}
   .login-card input{text-align:center;font-size:16px;letter-spacing:2px;padding:11px}
   .login-card .btn{width:100%;margin-top:14px;padding:11px}
+  .install-btn{margin-top:8px !important}
   .login-err{color:var(--err);font-size:12.5px;margin-top:10px;min-height:16px}
 
   .loading{text-align:center;color:var(--muted);padding:30px;font-size:13px}
@@ -208,5 +232,11 @@
     .topbar-inner{align-items:flex-start;flex-wrap:wrap}
     .app-title{position:static;transform:none;order:2;width:100%;justify-content:center;
       border-top:1px solid rgba(255,255,255,.14);padding-top:7px;margin-top:3px}
+  }
+  @media(max-width:680px){
+    .rec{flex-direction:column}
+    .rec .ops{width:100%}
+    .rec .ops .btn{flex:1}
+    .mini-rec{grid-template-columns:1fr}
   }
 </style>
