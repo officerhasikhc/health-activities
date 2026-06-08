@@ -22,13 +22,33 @@ jobs:
       - name: Install clasp
         run: npm install -g @google/clasp@2.4.2
 
-      - name: Authenticate clasp
+      - name: Validate clasp auth
+        id: clasp_auth
         # المحتوى الكامل لملف ~/.clasprc.json (يُحفظ كسرّ CLASPRC_JSON)
-        run: printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const raw = process.env.CLASPRC_JSON || '';
+          let valid = false;
+          try {
+            const parsed = JSON.parse(raw);
+            valid = Boolean(parsed && parsed.token && parsed.token.access_token);
+          } catch (error) {
+            valid = false;
+          }
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `valid=${valid ? 'true' : 'false'}\n`);
+          if (valid) {
+            fs.writeFileSync(`${process.env.HOME}/.clasprc.json`, raw);
+          } else {
+            console.log('CLASPRC_JSON is missing or invalid; skipping Apps Script auto deploy.');
+          }
+          NODE
 
       - name: Push & Deploy
+        if: steps.clasp_auth.outputs.valid == 'true'
         env:
           DID: ${{ secrets.DEPLOYMENT_ID }}
         run: |
@@ -39,3 +59,9 @@ jobs:
           else
             echo "ℹ تم دفع الكود فقط (لم يُضبط سرّ DEPLOYMENT_ID لإعادة النشر)."
           fi
+
+      - name: Skip Apps Script deploy
+        if: steps.clasp_auth.outputs.valid != 'true'
+        run: |
+          echo "تم تخطي نشر Apps Script لأن سر CLASPRC_JSON غير مضبوط أو غير صالح."
+          echo "GitHub Pages لا يحتاج هذا السر؛ المطلوب فقط لإرسال ملفات src إلى Apps Script تلقائيًا."
