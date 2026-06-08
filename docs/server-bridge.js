@@ -1,11 +1,17 @@
 /* ============================================================
-   server-bridge.js — جسر Apps Script عبر iframe مخفي.
-   ملاحظة: fetch المباشر إلى Apps Script من GitHub Pages يفشل بسبب CORS،
-   لذلك يبقى iframe + google.script.run هو المسار المستقر.
+   server-bridge.js — اتصال هجين بخادم Apps Script.
+   1) المحاولة عبر fetch مباشر إلى doPost (text/plain، بلا preflight،
+      ولا يحتاج كوكيز طرف ثالث) — يعمل على الهاتف والتطبيق المثبّت.
+   2) عند فشل fetch (CORS/شبكة) يتراجع تلقائيًا إلى جسر iframe.
+   كل الخطوات مُسجّلة عبر AtharLog لتشخيصها من الهاتف (?debug=1).
    ============================================================ */
 (function(){
   function log(){ if (window.AtharLog) window.AtharLog.apply(null, ['bridge'].concat([].slice.call(arguments))); }
   var bridgeUrl = window.ATHAR_BRIDGE_URL;
+  // رابط /exec المباشر (بدون bridge=1) لاستدعاء doPost عبر fetch
+  var execUrl = window.ATHAR_EXEC_URL ||
+    (bridgeUrl ? bridgeUrl.replace(/([?&])bridge=1(&|$)/, '$1').replace(/[?&]$/, '') : '');
+  var fetchBroken = false;  // إن فشل fetch مرة (CORS مثلًا) ننتقل للجسر مباشرة
   var bridgeFrame = null;
   var bridgeWindow = null;
   var bridgeOrigin = null;
@@ -110,25 +116,69 @@
     else slot.reject(new Error(msg.error || 'تعذّر الاتصال بالخادم.'));
   });
 
+  // ---------- المسار 1: fetch مباشر إلى doPost ----------
+  function fetchCall(fn, args){
+    if (!execUrl) return Promise.reject(new Error('لا يوجد رابط /exec'));
+    var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = setTimeout(function(){ if (controller) controller.abort(); }, 90000);
+    log('fetch ->', fn);
+    return fetch(execUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ fn: fn, args: args || [] }),
+      redirect: 'follow',
+      credentials: 'omit',
+      signal: controller ? controller.signal : undefined
+    }).then(function(res){
+      clearTimeout(timer);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.text();
+    }).then(function(text){
+      var payload;
+      try { payload = JSON.parse(text); }
+      catch (e) { throw new Error('استجابة غير JSON'); }
+      log('fetch ok:', fn);
+      if (payload && payload.ok) return payload.data;
+      throw new Error((payload && payload.error) || 'تعذّر الاتصال بالخادم.');
+    }).catch(function(err){
+      clearTimeout(timer);
+      throw err;
+    });
+  }
+
+  // ---------- المسار 2: جسر iframe (احتياطي) ----------
+  function bridgeCall(fn, args){
+    log('طلب عبر الجسر:', fn, 'ready=' + ready);
+    return waitReady(12000).catch(function(){
+      log('إعادة تحميل الجسر بعد فشل أول انتظار');
+      reloadBridge();
+      return waitReady(18000);
+    }).then(function(){
+      return callBridge(fn, args);
+    });
+  }
+
   window.AtharServer = {
     run: function(fn, args){
-      log('طلب:', fn, 'ready=' + ready);
-      return waitReady(12000).catch(function(){
-        log('إعادة تحميل الجسر بعد فشل أول انتظار');
-        reloadBridge();
-        return waitReady(18000);
-      }).then(function(){
-        return callBridge(fn, args);
+      // إن سبق نجاح/فشل fetch نلتزم بالقرار لتفادي التأخير
+      if (fetchBroken) {
+        return bridgeCall(fn, args).catch(function(err){ log('فشل الطلب:', fn, '->', err && err.message); throw err; });
+      }
+      return fetchCall(fn, args).catch(function(err){
+        log('فشل fetch:', fn, '->', (err && err.message), '— التحويل إلى الجسر');
+        fetchBroken = true;
+        return bridgeCall(fn, args);
       }).catch(function(err){
-        log('فشل الطلب:', fn, '->', err && err.message);
+        log('فشل الطلب نهائيًا:', fn, '->', err && err.message);
         throw err;
       });
     },
     reload: reloadBridge,
     isReady: function(){
-      return ready && !!bridgeWindow;
+      return !!execUrl || (ready && !!bridgeWindow);
     }
   };
 
+  // تجهيز الجسر مسبقًا كاحتياط (لا يضر إن نجح fetch)
   ensureFrame();
 })();
