@@ -81,6 +81,45 @@ function doGet(e) {
   return officialAppPage_();
 }
 
+// قائمة بيضاء بالعمليات المسموح استدعاؤها من الواجهة عبر fetch (JSON)
+var API_METHODS = {
+  init: true,
+  saveActivity: true,
+  getActivities: true,
+  deleteActivity: true,
+  exportActivityPdf: true,
+  getDashboard: true,
+  getDashboardItems: true,
+  addConfigItem: true,
+  removeConfigItem: true,
+  setRequiredField: true
+};
+
+/**
+ * نقطة اتصال JSON مباشرة (بديل الجسر/الـ iframe).
+ * تستقبل { fn, args } كنص JSON وترجع نتيجة الدالة كـ JSON.
+ * تعمل عبر النطاقات دون كوكيز الطرف الثالث (تحل مشكلة الدخول على الهاتف والتطبيق المثبّت).
+ */
+function doPost(e) {
+  var out = { ok: false };
+  try {
+    var body = (e && e.postData && e.postData.contents) ? JSON.parse(e.postData.contents) : {};
+    var fn = body.fn;
+    var args = body.args || [];
+    var target = (typeof globalThis !== 'undefined') ? globalThis[fn] : this[fn];
+    if (!fn || !API_METHODS[fn] || typeof target !== 'function') {
+      out.error = 'العملية غير مسموحة.';
+    } else {
+      out = { ok: true, data: target.apply(null, args) };
+    }
+  } catch (err) {
+    out = { ok: false, error: (err && err.message) ? err.message : String(err) };
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify(out))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 function officialAppPage_() {
   var logo = getAssetDataUri_(LOGIN_LOGO_NAME);
   var html = '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
@@ -774,12 +813,13 @@ function exportActivityPdf(id, actorEmpNo) {
   var activity = rowObject_(sh, rowIndex);
   activity.display_type = activityDisplayType_(activity);
   var letter = getOfficialLetterBlob_();
+  var letterDataUri = letter ? blobDataUri_(letter) : '';
   var photos = String(activity.photo_ids || '').split(',').filter(Boolean).map(function(pid){
     try { return blobDataUri_(DriveApp.getFileById(pid).getBlob()); }
     catch (e) { return ''; }
   }).filter(Boolean);
 
-  var html = buildActivityPdfHtml_(activity, blobDataUri_(letter), photos);
+  var html = buildActivityPdfHtml_(activity, letterDataUri, photos);
   var fileName = safeFileName_('تقرير ' + formatDate_(activity.event_date) + ' - ' + activity.title) + '.pdf';
   var pdf = Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
     .getAs(MimeType.PDF)
@@ -806,18 +846,27 @@ function getReportRoot_() {
   return f;
 }
 
+/**
+ * يجلب قالب الخطاب الرسمي من Drive.
+ * يبحث بالمُعرّف المحفوظ ثم بالاسم (jpg/png/jpeg). يرجع null عند الغياب
+ * حتى لا يفشل تصدير PDF كليًا (يُصدَّر بلا خلفية رسمية).
+ * لتفعيل القالب: ارفع الملف officiallyletter.jpg إلى Google Drive للحساب الخادم.
+ */
 function getOfficialLetterBlob_() {
   var fileId = PROP.getProperty('OFFICIAL_LETTER_ID');
   if (fileId) {
     try { return DriveApp.getFileById(fileId).getBlob(); } catch (e) {}
   }
-  var files = DriveApp.getFilesByName(OFFICIAL_LETTER_NAME);
-  if (!files.hasNext()) {
-    throw new Error('لم يُعثر على قالب الخطاب الرسمي في Drive باسم ' + OFFICIAL_LETTER_NAME + '.');
+  var names = [OFFICIAL_LETTER_NAME, 'officiallyletter.png', 'officiallyletter.jpeg'];
+  for (var i = 0; i < names.length; i++) {
+    var files = DriveApp.getFilesByName(names[i]);
+    if (files.hasNext()) {
+      var file = files.next();
+      PROP.setProperty('OFFICIAL_LETTER_ID', file.getId());
+      return file.getBlob();
+    }
   }
-  var file = files.next();
-  PROP.setProperty('OFFICIAL_LETTER_ID', file.getId());
-  return file.getBlob();
+  return null;
 }
 
 function blobDataUri_(blob) {
@@ -869,7 +918,10 @@ function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
     pages.push('<section class="page"><main class="content photos"><h2>' + html_(a.title) + '</h2><div class="photo-list">' + chunk + '</div></main></section>');
   }
 
+  var pageBg = letterDataUri
+    ? 'background:url("' + letterDataUri + '") center/cover no-repeat;'
+    : 'background:#fff;border:1px solid #dfe4ea;';
   return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
-    '<style>@page{size:A4;margin:0}html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#1d2733}.page{width:210mm;height:297mm;position:relative;box-sizing:border-box;page-break-after:always;background:url("' + letterDataUri + '") center/cover no-repeat;overflow:hidden}.page:last-child{page-break-after:auto}.content{position:absolute;inset:48mm 18mm 22mm 18mm}.first h1{font-size:18pt;margin:0 0 8mm;text-align:center;color:#123a46}.row{display:grid;grid-template-columns:36mm 1fr;gap:5mm;border-bottom:1px solid #dfe4ea;padding:3.3mm 0;font-size:10.5pt;line-height:1.55}.row span{color:#5b6b7b;font-weight:bold}.row b{font-weight:500;white-space:pre-wrap}.photos h2{font-size:14pt;margin:0 0 6mm;text-align:center;color:#123a46}.photo-list{display:grid;grid-template-rows:repeat(3,1fr);gap:6mm;height:210mm}figure{margin:0;border:1px solid #dfe4ea;padding:2mm;background:rgba(255,255,255,.92);display:flex;flex-direction:column;gap:1.5mm}figure img{width:100%;height:58mm;object-fit:contain}figcaption{text-align:center;color:#5b6b7b;font-size:9pt}</style>' +
+    '<style>@page{size:A4;margin:0}html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#1d2733}.page{width:210mm;height:297mm;position:relative;box-sizing:border-box;page-break-after:always;' + pageBg + 'overflow:hidden}.page:last-child{page-break-after:auto}.content{position:absolute;inset:48mm 18mm 22mm 18mm}.first h1{font-size:18pt;margin:0 0 8mm;text-align:center;color:#123a46}.row{display:grid;grid-template-columns:36mm 1fr;gap:5mm;border-bottom:1px solid #dfe4ea;padding:3.3mm 0;font-size:10.5pt;line-height:1.55}.row span{color:#5b6b7b;font-weight:bold}.row b{font-weight:500;white-space:pre-wrap}.photos h2{font-size:14pt;margin:0 0 6mm;text-align:center;color:#123a46}.photo-list{display:grid;grid-template-rows:repeat(3,1fr);gap:6mm;height:210mm}figure{margin:0;border:1px solid #dfe4ea;padding:2mm;background:rgba(255,255,255,.92);display:flex;flex-direction:column;gap:1.5mm}figure img{width:100%;height:58mm;object-fit:contain}figcaption{text-align:center;color:#5b6b7b;font-size:9pt}</style>' +
     '</head><body>' + pages.join('') + '</body></html>';
 }

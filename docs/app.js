@@ -559,16 +559,26 @@ function paintRecords(list){
   box.innerHTML=list.map(function(o){
     window._recs[o.id]=o;
     var typeLabel=o.type==='يوم عالمي'&&o.world_day?((o.display_type||o.type)+' — '+o.world_day):(o.display_type||o.type);
-    return '<div class="rec"><div class="meta">'+
-      '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
-      '<div class="row2">'+
-        '<span class="badge">'+esc(typeLabel)+'</span>'+
-        '<span>التاريخ: '+esc(o.event_date)+'</span>'+
-        (USER.role==='admin'?'<span>المنفّذة: '+esc(o.executor_name)+'</span>':'')+
-        (o.beneficiaries?'<span>المستفيدون: '+esc(o.beneficiaries)+'</span>':'')+
-        (o.photo_ids.length?'<span>'+o.photo_ids.length+' صورة</span>':'')+
-        ((o.has_partnership===true||o.has_partnership==='true')?'<span class="badge part">شراكة</span>':'')+
-      '</div></div>'+
+    var firstId=(o.photo_ids&&o.photo_ids.length)?o.photo_ids[0]:'';
+    var thumb=firstId
+      ? '<div class="rec-thumb" onclick="viewActivity(\''+o.id+'\')"><img loading="lazy" src="https://drive.google.com/thumbnail?id='+firstId+'&sz=w300">'+
+        (o.photo_ids.length>1?'<span class="rec-thumb-count">'+o.photo_ids.length+'</span>':'')+'</div>'
+      : '<div class="rec-thumb rec-thumb-empty" onclick="viewActivity(\''+o.id+'\')"><span>لا صور</span></div>';
+    return '<div class="rec">'+
+      thumb+
+      '<div class="meta">'+
+        '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
+        '<div class="row2">'+
+          '<span class="badge">'+esc(typeLabel)+'</span>'+
+          ((o.has_partnership===true||o.has_partnership==='true')?'<span class="badge part">شراكة</span>':'')+
+        '</div>'+
+        '<div class="rec-facts">'+
+          '<span class="fact"><i>التاريخ</i>'+esc(o.event_date)+'</span>'+
+          (USER.role==='admin'?'<span class="fact"><i>المنفّذة</i>'+esc(o.executor_name)+'</span>':'')+
+          (o.beneficiaries?'<span class="fact"><i>المستفيدون</i>'+esc(o.beneficiaries)+'</span>':'')+
+          (o.photo_ids.length?'<span class="fact"><i>الصور</i>'+o.photo_ids.length+'</span>':'')+
+        '</div>'+
+      '</div>'+
       '<div class="ops">'+
         '<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>'+
         (USER.role==='admin'?'<button class="btn btn-print btn-sm" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⎙</span> طباعة PDF</button>':'')+

@@ -88,6 +88,29 @@ window.addEventListener('online', function () {
   syncOutbox();
 });
 
+// رفع تلقائي عند عودة التطبيق للواجهة (مهم لـ iOS الذي لا يدعم Background Sync)
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && navigator.onLine) syncOutbox();
+});
+window.addEventListener('focus', function () {
+  if (navigator.onLine) syncOutbox();
+});
+
+// عند طلب Service Worker المزامنة في الخلفية
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', function (e) {
+    if (e.data && e.data.type === 'athar-sync') syncOutbox();
+  });
+}
+
+// تسجيل Background Sync عند توفّره (Chrome/أندرويد) لرفع المحفوظ حتى بعد إغلاق التطبيق
+function registerBackgroundSync() {
+  if (!('serviceWorker' in navigator) || !('SyncManager' in window)) return;
+  navigator.serviceWorker.ready.then(function (reg) {
+    if (reg.sync) reg.sync.register('athar-outbox').catch(function () {});
+  }).catch(function () {});
+}
+
 function syncOutbox() {
   if (!Outbox.available) return;
   Outbox.flush().then(function (r) {
@@ -103,6 +126,7 @@ function updatePending() {
   if (!Outbox.available) return;
   Outbox.count().then(function (n) {
     var el = document.getElementById('pending');
+    if (n > 0) registerBackgroundSync();
     if (!el) return;
     if (n > 0) { el.textContent = 'بانتظار الرفع: ' + n; el.classList.remove('hidden'); }
     else el.classList.add('hidden');

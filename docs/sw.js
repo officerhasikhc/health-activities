@@ -1,4 +1,4 @@
-var CACHE_NAME = 'athar-shell-v2';
+var CACHE_NAME = 'athar-shell-v3';
 var SHELL = [
   './',
   './index.html',
@@ -26,17 +26,33 @@ self.addEventListener('activate', function(event){
   self.clients.claim();
 });
 
+// الشبكة أولًا للأصول البرمجية (لتفادي تقادم النسخة) مع رجوع للكاش عند انقطاع الشبكة.
 self.addEventListener('fetch', function(event){
   if (event.request.method !== 'GET') return;
   var url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(event.request).then(function(hit){
-      return hit || fetch(event.request).then(function(response){
-        var copy = response.clone();
-        caches.open(CACHE_NAME).then(function(cache){ cache.put(event.request, copy); });
-        return response;
+    fetch(event.request).then(function(response){
+      var copy = response.clone();
+      caches.open(CACHE_NAME).then(function(cache){ cache.put(event.request, copy); });
+      return response;
+    }).catch(function(){
+      return caches.match(event.request).then(function(hit){
+        return hit || caches.match('./index.html');
       });
     })
   );
 });
+
+// Background Sync: إخطار الصفحات لرفع المحفوظ محليًا (outbox).
+self.addEventListener('sync', function(event){
+  if (event.tag === 'athar-outbox') {
+    event.waitUntil(notifyClientsToSync());
+  }
+});
+
+function notifyClientsToSync(){
+  return self.clients.matchAll({ includeUncontrolled: true, type: 'window' }).then(function(clients){
+    clients.forEach(function(client){ client.postMessage({ type: 'athar-sync' }); });
+  });
+}

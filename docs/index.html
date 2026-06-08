@@ -24,7 +24,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/logo-login.png">
   <link rel="apple-touch-icon" href="assets/logo-login.png">
-  <link rel="stylesheet" href="styles.css?v=20260608-2">
+  <link rel="stylesheet" href="styles.css?v=20260609-1">
 </head>
 <body>
 
@@ -76,15 +76,15 @@
   <div id="toast"></div>
 
   <script>
-    window.ATHAR_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycbxUg1TtF9Nmr7G_r6m0QznyPAvc2XXNTjJisNOFUTPhFZ2wbyDxrk-s5gx4e7L3w9N9wQ/exec?bridge=1';
+    window.ATHAR_EXEC_URL = 'https://script.google.com/macros/s/AKfycbxUg1TtF9Nmr7G_r6m0QznyPAvc2XXNTjJisNOFUTPhFZ2wbyDxrk-s5gx4e7L3w9N9wQ/exec';
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function(){
         navigator.serviceWorker.register('./sw.js').catch(function(){});
       });
     }
   </script>
-  <script src="server-bridge.js?v=20260608-2"></script>
-  <script src="offline.js?v=20260608-2"></script>
-  <script src="app.js?v=20260608-2"></script>
+  <script src="server-bridge.js?v=20260609-1"></script>
+  <script src="offline.js?v=20260609-1"></script>
+  <script src="app.js?v=20260609-1"></script>
 </body>
 </html>
