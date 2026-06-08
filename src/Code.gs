@@ -115,6 +115,61 @@ function ss_() {
   return SpreadsheetApp.openById(id);
 }
 
+/**
+ * فحص سريع من محرر Apps Script بعد التهيئة.
+ * لا ينشئ أو يغيّر بيانات؛ فقط يساعد على التأكد أن النشر مرتبط بالمشروع الصحيح.
+ */
+function diagnoseSetup() {
+  var out = {
+    scriptId: '',
+    sheetId: PROP.getProperty('SHEET_ID') || '',
+    photoRootId: PROP.getProperty('PHOTO_ROOT_ID') || '',
+    sheetOk: false,
+    photoRootOk: false,
+    sheets: [],
+    admin65886Ok: false,
+    errors: []
+  };
+
+  try { out.scriptId = ScriptApp.getScriptId(); }
+  catch (e) { out.errors.push('scriptId: ' + e.message); }
+
+  if (out.sheetId) {
+    try {
+      var ss = SpreadsheetApp.openById(out.sheetId);
+      out.sheetOk = true;
+      out.sheets = ss.getSheets().map(function (sh) { return sh.getName(); });
+      var users = ss.getSheetByName(SHEETS.USERS);
+      if (users && users.getLastRow() > 1) {
+        var data = users.getDataRange().getValues();
+        var head = data.shift();
+        var empIdx = head.indexOf('emp_no');
+        var activeIdx = head.indexOf('active');
+        out.admin65886Ok = data.some(function (r) {
+          return String(r[empIdx]) === '65886' && r[activeIdx] !== false;
+        });
+      }
+    } catch (e2) {
+      out.errors.push('sheet: ' + e2.message);
+    }
+  } else {
+    out.errors.push('SHEET_ID is missing. Run setup() in this script project.');
+  }
+
+  if (out.photoRootId) {
+    try {
+      DriveApp.getFolderById(out.photoRootId);
+      out.photoRootOk = true;
+    } catch (e3) {
+      out.errors.push('photoRoot: ' + e3.message);
+    }
+  } else {
+    out.errors.push('PHOTO_ROOT_ID is missing. Run setup() in this script project.');
+  }
+
+  return out;
+}
+
 // ============================ الإقلاع الموحّد ============================
 /** استدعاء واحد بدل اثنين عند الدخول: تسجيل الدخول + القوائم معًا (أداء أفضل). */
 function init(empNo) {

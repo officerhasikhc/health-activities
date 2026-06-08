@@ -43,9 +43,9 @@ function doLogin(){
     document.getElementById('whoName').textContent=USER.name;
     document.getElementById('whoTitle').textContent=USER.title;
     boot();
-  }).catch(function(){
+  }).catch(function(e){
     btn.disabled=false; btn.textContent='دخول';
-    err.textContent='تعذّر الاتصال، أعد المحاولة.';
+    err.textContent=(e && e.message) ? e.message : 'تعذّر الاتصال، أعد المحاولة.';
   });
 }
 document.addEventListener('keydown',function(e){
