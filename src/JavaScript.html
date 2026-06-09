@@ -1005,14 +1005,26 @@ function askDelete(id){
         if(card){
           card.style.transition = 'all 0.3s ease';
           card.style.opacity = '0';
-          card.style.transform = 'scale(0.95)';
+          card.style.transform = 'translateX(-50px)';
+          setTimeout(function(){
+            card.style.height = card.offsetHeight + 'px';
+            card.style.overflow = 'hidden';
+            setTimeout(function() {
+              card.style.height = '0px';
+              card.style.marginTop = '0px';
+              card.style.marginBottom = '0px';
+              card.style.paddingTop = '0px';
+              card.style.paddingBottom = '0px';
+              card.style.border = 'none';
+            }, 10);
+          }, 300);
           setTimeout(function(){ 
             card.remove(); 
             if(document.querySelectorAll('.rec').length===0){
               var box=document.getElementById('recList');
               if(box) box.innerHTML='<div class="empty">لا توجد فعاليات مسجّلة.</div>';
             }
-          }, 300);
+          }, 600);
         } else {
           loadRecords(true);
         }
