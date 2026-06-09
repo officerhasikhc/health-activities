@@ -159,6 +159,8 @@
   .btn-view:hover{background:#e3ebee}
   .btn-excel{background:#e8f3ed;color:#1e6b48;border:1px solid #bcd9ca}
   .btn-excel:hover{background:#dceee5}
+  .btn-zip{background:#edf2f6;color:#31546b;border:1px solid #c8d7e1}
+  .btn-zip:hover{background:#e1ebf1}
   .btn-danger-outline{background:#fff;color:var(--err);border:1px solid rgba(178,59,59,.45)}
   .btn-danger-outline:hover{background:#fff4f4;border-color:var(--err)}
   .ico{font-size:14px;line-height:1}
@@ -271,6 +273,7 @@
   .loading{text-align:center;color:var(--muted);padding:30px;font-size:13px}
   .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--line);
     border-top-color:var(--brand);border-radius:50%;animation:sp .7s linear infinite;vertical-align:middle}
+  .spin.tiny{width:13px;height:13px;border-width:2px;margin-inline-end:2px}
   @keyframes sp{to{transform:rotate(360deg)}}
   @media(max-width:1100px){
     .topbar-inner{align-items:flex-start;flex-wrap:wrap}

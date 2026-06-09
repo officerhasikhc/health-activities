@@ -6,6 +6,8 @@ var FORM = null;
 var DRAFT_KEY = 'athar_draft';
 var REC_CACHE = {};       // ذاكرة مؤقتة للسجل حسب (سنة|شهر)
 var DASH_CACHE = {};      // ذاكرة مؤقتة للمؤشرات حسب الفترة
+var REC_PENDING = {};
+var DASH_PENDING = {};
 var deferredInstallPrompt = null;
 var REMEMBER_KEY = 'athar_remember_emp';
 var SAVED_EMP_KEY = 'athar_saved_emp';
@@ -20,7 +22,7 @@ var IDLE_LIMIT_MS = 10 * 60 * 1000;
 var idleTimer = null;
 var idleEvents = ['click','keydown','touchstart','mousemove','scroll','input'];
 
-function invalidateCaches(){ REC_CACHE = {}; DASH_CACHE = {}; }
+function invalidateCaches(){ REC_CACHE = {}; DASH_CACHE = {}; REC_PENDING = {}; DASH_PENDING = {}; }
 
 /* ====================== مساعد استدعاء الخادم ====================== */
 function run(fn){
@@ -194,6 +196,7 @@ function boot(){
   show('register');
   syncOutbox();      // رفع أي محفوظ محليًا من جلسة سابقة
   updatePending();
+  Warmup.afterLogin();
 }
 
 function renderTabs(){
@@ -204,7 +207,8 @@ function renderTabs(){
   ];
   if(USER.role==='admin') tabs.push({id:'admin', label:'الإدارة'});
   document.getElementById('tabsBar').innerHTML=tabs.map(function(t){
-    return '<button class="tab" data-tab="'+t.id+'" onclick="show(\''+t.id+'\')">'+t.label+'</button>';
+    var warm=(t.id==='records'||t.id==='dashboard')?' onpointerenter="Warmup.intent(\''+t.id+'\')" ontouchstart="Warmup.intent(\''+t.id+'\')"':'';
+    return '<button class="tab" data-tab="'+t.id+'" onclick="show(\''+t.id+'\')"'+warm+'>'+t.label+'</button>';
   }).join('');
 }
 function setActiveTab(id){
@@ -318,6 +322,96 @@ function recordMatchesFilter(o, filter){
   if(filter.mode==='year') return p.year===filter.year;
   return true;
 }
+
+/* ====================== التسخين والكاش ====================== */
+function filterKey(filter){ return JSON.stringify(filter || currentPeriod()); }
+function clonePeriod(filter){
+  var p=currentPeriod(), f=filter||{};
+  return {
+    mode:f.mode||'month',
+    year:parseInt(f.year,10)||p.year,
+    month:parseInt(f.month,10)||p.month,
+    quarter:parseInt(f.quarter,10)||p.quarter,
+    half:parseInt(f.half,10)||p.half
+  };
+}
+function shiftedMonthFilter(filter, delta){
+  var f=clonePeriod(filter);
+  var d=new Date(f.year, (f.month||1)-1 + delta, 1);
+  var month=d.getMonth()+1;
+  return { mode:'month', year:d.getFullYear(), month:month, quarter:Math.floor((month-1)/3)+1, half:month<=6?1:2 };
+}
+function idleWork(fn){
+  if('requestIdleCallback' in window) requestIdleCallback(fn, { timeout:1800 });
+  else setTimeout(fn, 250);
+}
+function fetchRecordsForFilter(filter, force){
+  filter=clonePeriod(filter);
+  var key=filterKey(filter);
+  if(!force && REC_CACHE[key]) return Promise.resolve(REC_CACHE[key]);
+  if(REC_PENDING[key]) return REC_PENDING[key];
+  REC_PENDING[key]=run('getActivities', USER.no, filter).then(function(list){
+    return mergePendingRecords(list, filter).then(function(merged){
+      REC_CACHE[key]=merged;
+      delete REC_PENDING[key];
+      return merged;
+    });
+  }).catch(function(e){
+    delete REC_PENDING[key];
+    throw e;
+  });
+  return REC_PENDING[key];
+}
+function fetchDashboardForFilter(filter, force){
+  filter=clonePeriod(filter);
+  var key=filterKey(filter);
+  if(!force && DASH_CACHE[key]) return Promise.resolve(DASH_CACHE[key]);
+  if(DASH_PENDING[key]) return DASH_PENDING[key];
+  DASH_PENDING[key]=run('getDashboard', USER.no, filter).then(function(d){
+    DASH_CACHE[key]=d;
+    delete DASH_PENDING[key];
+    return d;
+  }).catch(function(e){
+    delete DASH_PENDING[key];
+    throw e;
+  });
+  return DASH_PENDING[key];
+}
+function warmRecordFilters(seed){
+  var f=clonePeriod(seed), list=[f];
+  if(f.mode==='month'){
+    list.push(shiftedMonthFilter(f,-1), shiftedMonthFilter(f,1));
+    list.push({mode:'quarter',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
+    list.push({mode:'half',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
+  } else if(f.mode==='quarter' || f.mode==='half'){
+    list.push({mode:'month',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
+    list.push({mode:'year',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
+  }
+  list.forEach(function(x){ fetchRecordsForFilter(x, false).catch(function(){}); });
+}
+function warmDashboardFilters(seed){
+  var f=clonePeriod(seed), list=[f];
+  if(f.mode==='month') list.push({mode:'quarter',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
+  if(f.mode==='quarter' || f.mode==='half') list.push({mode:'year',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
+  list.forEach(function(x){ fetchDashboardForFilter(x, false).catch(function(){}); });
+}
+var Warmup = {
+  afterLogin:function(){
+    if(!USER) return;
+    idleWork(function(){
+      var f=Object.assign({mode:'month'}, currentPeriod());
+      fetchRecordsForFilter(f, false).catch(function(){});
+      fetchDashboardForFilter(f, false).catch(function(){});
+    });
+  },
+  records:function(filter){ if(USER) idleWork(function(){ warmRecordFilters(filter||periodFilter('fl')); }); },
+  dashboard:function(filter){ if(USER) idleWork(function(){ warmDashboardFilters(filter||periodFilter('dash')); }); },
+  intent:function(area){
+    if(!USER) return;
+    if(area==='records' || area==='export') this.records();
+    else if(area==='dashboard') this.dashboard();
+  }
+};
 
 /* ====================== نموذج التسجيل ====================== */
 function newForm(){
@@ -723,7 +817,9 @@ function renderRecords(){
     periodControlsHtml('fl')+
     '<div class="filters action-filters">'+
       '<div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadRecords(true)">تحديث</button></div>'+
-      '<div class="field" style="justify-content:flex-end"><button class="btn btn-excel btn-sm" id="excelBtn" onclick="exportExcel()">تصدير Excel</button></div>'+
+      '<div class="field" style="justify-content:flex-end"><button class="btn btn-excel btn-sm" id="excelBtn" onclick="exportExcel()" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تصدير Excel</button></div>'+
+      '<div class="field" style="justify-content:flex-end"><button class="btn btn-zip btn-sm" id="zipFilterBtn" onclick="exportZip(\'filter\')" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تحميل ZIP حسب الفلتر</button></div>'+
+      '<div class="field" style="justify-content:flex-end"><button class="btn btn-zip btn-sm" id="zipYearBtn" onclick="exportZip(\'year\')" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تحميل ZIP للسنة</button></div>'+
     '</div>'+
     '<div id="recList"><div class="loading"><span class="spin"></span> جارٍ التحميل…</div></div>'+
   '</div>';
@@ -734,13 +830,17 @@ function renderRecords(){
 }
 function loadRecords(force){
   var filter=periodFilter('fl');
-  var key=periodKey('fl');
-  if(!force && REC_CACHE[key]){ paintRecords(REC_CACHE[key]); return; }
-  document.getElementById('recList').innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
-  run('getActivities', USER.no, filter).then(function(list){
-    mergePendingRecords(list, filter).then(function(merged){
-      REC_CACHE[key]=merged; paintRecords(merged);
-    });
+  var key=filterKey(filter);
+  if(REC_CACHE[key]){
+    paintRecords(REC_CACHE[key]);
+    Warmup.records(filter);
+    if(!force) return;
+  } else {
+    document.getElementById('recList').innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
+  }
+  fetchRecordsForFilter(filter, !!force).then(function(merged){
+    paintRecords(merged);
+    Warmup.records(filter);
   }).catch(function(e){
     var box=document.getElementById('recList');
     if(box) box.innerHTML='<div class="empty">تعذّر تحميل السجل: '+esc((e&&e.message)||'خطأ غير معروف')+'<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadRecords(true)">إعادة المحاولة</button></div>';
@@ -815,7 +915,7 @@ function paintRecords(list){
       '<div class="ops">'+
         '<button class="btn btn-view btn-sm" onclick="viewActivity(\''+o.id+'\')"><span class="ico">◉</span> عرض</button>'+
         (isPending?'':'<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>')+
-        (!isPending&&USER.role==='admin'?'<button class="btn btn-print btn-sm" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⎙</span> طباعة PDF</button>':'')+
+        (isPending?'':'<button class="btn btn-print btn-sm" id="pdfBtn_'+escAttr(o.id)+'" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⎙</span> تحميل PDF</button>')+
         (isPending?'':'<button class="btn btn-danger-outline btn-sm" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>')+
       '</div></div>';
   }).join('');
@@ -905,50 +1005,104 @@ function askDelete(id){
 
 function exportPdf(id){
   var o=window._recs[id]; if(!o) return;
-  toast('جارٍ إنشاء ملف PDF…');
-  run('exportActivityPdf',id,USER.no).then(function(r){
-    if(r&&r.ok){
-      toast('تم إنشاء ملف PDF.','ok');
-      openModal('تم إنشاء PDF',
-        '<p style="margin:0 0 10px">تم إنشاء تقرير «'+esc(o.title)+'». اختر فتحه أو تحميله.</p>'+
-        '<div class="hint">'+esc(r.name||'تقرير PDF')+'</div>',
-        '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
-        '<a class="btn btn-print" target="_blank" rel="noopener" href="'+escAttr(r.url)+'">فتح PDF</a>'+
-        '<a class="btn btn-primary" target="_blank" rel="noopener" href="'+escAttr(r.downloadUrl||r.url)+'">تحميل PDF</a>');
-    }
+  var btn=document.getElementById('pdfBtn_'+id);
+  setBusy(btn, 'جارٍ تجهيز الملف…');
+  run('exportActivityPdfDownload',id,USER.no).then(function(r){
+    restoreBusy(btn);
+    if(r&&r.ok) handleDownloadResponse(r, 'PDF');
     else toast((r&&r.msg)||'تعذّر إنشاء PDF.','err');
   }).catch(function(e){
+    restoreBusy(btn);
     toast((e&&e.message)||'تعذّر إنشاء PDF.','err');
   });
 }
 function exportExcel(){
   var btn=document.getElementById('excelBtn');
-  if(btn){ btn.disabled=true; btn.textContent='جارٍ التصدير…'; }
-  toast('جارٍ إنشاء ملف Excel…');
-  run('exportActivitiesExcel', periodFilter('fl'), USER.no).then(function(r){
-    if(btn){ btn.disabled=false; btn.textContent='تصدير Excel'; }
-    if(r&&r.ok){
-      toast('تم إنشاء ملف Excel.','ok');
-      triggerDownload(r.downloadUrl||r.url, r.name||'athar.xlsx');
-      openModal('تم إنشاء Excel',
-        '<p style="margin:0 0 10px">تم إنشاء تقرير Excel للفترة: '+esc(r.period||'')+'</p>'+
-        '<div class="hint">عدد السجلات: '+esc(r.count||0)+' · '+esc(r.name||'تقرير Excel')+'</div>',
-        '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
-        '<a class="btn btn-ghost" target="_blank" rel="noopener" href="'+escAttr(r.url)+'">فتح الملف</a>'+
-        '<a class="btn btn-excel" target="_blank" rel="noopener" href="'+escAttr(r.downloadUrl||r.url)+'">تحميل Excel</a>');
-    } else {
-      toast((r&&r.msg)||'تعذّر إنشاء Excel.','err');
-    }
+  setBusy(btn, 'جارٍ تجهيز الملف…');
+  run('exportActivitiesExcelDownload', periodFilter('fl'), USER.no).then(function(r){
+    restoreBusy(btn);
+    if(r&&r.ok) handleDownloadResponse(r, 'Excel');
+    else toast((r&&r.msg)||'تعذّر إنشاء Excel.','err');
   }).catch(function(e){
-    if(btn){ btn.disabled=false; btn.textContent='تصدير Excel'; }
+    restoreBusy(btn);
     toast((e&&e.message)||'تعذّر إنشاء Excel.','err');
   });
+}
+function exportZip(scope){
+  var btn=document.getElementById(scope==='year'?'zipYearBtn':'zipFilterBtn');
+  var filter=periodFilter('fl');
+  var cached=REC_CACHE[filterKey(filter)];
+  var label=(scope==='year')?'جارٍ تجهيز ملفات السنة…':
+    (cached&&cached.length?'تجهيز '+cached.length+' ملفات…':'جارٍ تجهيز الملفات…');
+  setBusy(btn, label);
+  var options = scope==='year' ? { scope:'year', year:(filter.mode==='all'?currentPeriod().year:filter.year) } : { scope:'filter' };
+  run('exportActivitiesZipDownload', filter, USER.no, options).then(function(r){
+    restoreBusy(btn);
+    if(r&&r.ok) handleDownloadResponse(r, 'ZIP');
+    else toast((r&&r.msg)||'تعذّر إنشاء ZIP.','err');
+  }).catch(function(e){
+    restoreBusy(btn);
+    toast((e&&e.message)||'تعذّر إنشاء ZIP.','err');
+  });
+}
+function setBusy(btn, text){
+  if(!btn) return;
+  if(!btn.getAttribute('data-original-text')) btn.setAttribute('data-original-text', btn.textContent);
+  btn.disabled=true;
+  btn.innerHTML='<span class="spin tiny"></span>'+esc(text||'جارٍ التجهيز…');
+}
+function restoreBusy(btn){
+  if(!btn) return;
+  btn.disabled=false;
+  btn.textContent=btn.getAttribute('data-original-text')||btn.textContent;
+  btn.removeAttribute('data-original-text');
+}
+function handleDownloadResponse(r, label){
+  if(r.delivery==='inline' && r.base64){
+    var blob=base64ToBlob(r.base64, r.mime||'application/octet-stream');
+    triggerBlobDownload(blob, r.fileName||r.name||('athar-'+String(label||'file').toLowerCase()));
+    return;
+  }
+  var url=r.downloadUrl||r.url;
+  if(url){
+    triggerDownload(url, r.fileName||r.name||'athar-report');
+    showDownloadFallback(r, label);
+    return;
+  }
+  toast('تعذّر تجهيز رابط التحميل.','err');
+}
+function showDownloadFallback(r, label){
+  var url=r.downloadUrl||r.url;
+  var reason=r.reason==='count'?'عدد الملفات كبير، لذلك سيتم التحميل عبر الرابط الاحتياطي.':'الملف كبير، لذلك سيتم التحميل عبر الرابط الاحتياطي.';
+  var meta=[];
+  if(r.period) meta.push('الفترة: '+r.period);
+  if(r.count!=null) meta.push('عدد السجلات: '+r.count);
+  openModal('تحميل '+esc(label||'الملف'),
+    '<p style="margin:0 0 10px">'+esc(reason)+'</p>'+
+    (meta.length?'<div class="hint">'+esc(meta.join(' · '))+'</div>':''),
+    '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
+    '<a class="btn btn-primary" target="_blank" rel="noopener" href="'+escAttr(url)+'">تحميل الملف</a>');
+}
+function base64ToBlob(base64, mime){
+  var bin=atob(base64), len=bin.length, chunks=[];
+  for(var i=0;i<len;i+=8192){
+    var slice=bin.slice(i,i+8192), arr=new Uint8Array(slice.length);
+    for(var j=0;j<slice.length;j++) arr[j]=slice.charCodeAt(j);
+    chunks.push(arr);
+  }
+  return new Blob(chunks, { type:mime||'application/octet-stream' });
+}
+function triggerBlobDownload(blob,name){
+  var url=URL.createObjectURL(blob);
+  triggerDownload(url,name);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 30000);
 }
 function triggerDownload(url,name){
   if(!url) return;
   try{
     var a=document.createElement('a');
-    a.href=url; a.download=name||''; a.target='_blank'; a.rel='noopener';
+    a.href=url; a.download=name||''; a.rel='noopener';
+    if(!String(url).match(/^blob:/)) a.target='_blank';
     document.body.appendChild(a); a.click();
     setTimeout(function(){ document.body.removeChild(a); }, 100);
   }catch(e){}
@@ -968,12 +1122,19 @@ function renderDashboard(){
   loadDashboard();
 }
 function loadDashboard(force){
-  var key=periodKey('dash');
+  var filter=periodFilter('dash');
+  var key=filterKey(filter);
   var body=document.getElementById('dashBody');
-  if(!force && DASH_CACHE[key]){ paintDash(DASH_CACHE[key]); return; }
-  if(body) body.innerHTML='<div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div>';
-  run('getDashboard', USER.no, periodFilter('dash')).then(function(d){
-    DASH_CACHE[key]=d; paintDash(d);
+  if(DASH_CACHE[key]){
+    paintDash(DASH_CACHE[key]);
+    Warmup.dashboard(filter);
+    if(!force) return;
+  } else if(body) {
+    body.innerHTML='<div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div>';
+  }
+  fetchDashboardForFilter(filter, !!force).then(function(d){
+    paintDash(d);
+    Warmup.dashboard(filter);
   }).catch(function(e){
     var v=document.getElementById('dashBody');
     if(v) v.innerHTML='<div class="empty">تعذّر تحميل المؤشرات: '+esc((e&&e.message)||'خطأ غير معروف')+'<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadDashboard(true)">إعادة المحاولة</button></div>';
@@ -1152,4 +1313,3 @@ function isoDate(s){ if(!s) return ''; var p=String(s).split('/'); if(p.length==
 function splitList(s){ return String(s||'').split(/[،,]/).map(function(x){return x.trim();}).filter(Boolean); }
 
 </script>
-

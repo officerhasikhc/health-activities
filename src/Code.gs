@@ -39,6 +39,10 @@ var LOGIN_LOGO_NAME = 'logo-login.png';
 var OFFICIAL_APP_URL = 'https://officerhasikhc.github.io/health-activities/';
 var GITHUB_ORIGIN = 'https://officerhasikhc.github.io';
 var REQUIRED_FIELD_CATEGORY = 'required_field';
+var INLINE_DOWNLOAD_MAX_BYTES = 5 * 1024 * 1024;
+var ZIP_INLINE_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024;
+var ZIP_INLINE_MAX_COUNT = 12;
+var ZIP_DRIVE_MAX_COUNT = 35;
 var REQUIRED_LOCKED_FIELDS = ['type','title','event_date','executor_no'];
 var REQUIRED_FIELD_DEFAULTS = {
   objective: true,
@@ -89,7 +93,10 @@ var API_METHODS = {
   getActivities: true,
   deleteActivity: true,
   exportActivityPdf: true,
+  exportActivityPdfDownload: true,
   exportActivitiesExcel: true,
+  exportActivitiesExcelDownload: true,
+  exportActivitiesZipDownload: true,
   getDashboard: true,
   getDashboardItems: true,
   addConfigItem: true,
@@ -998,13 +1005,33 @@ function getDashboardItems(empNo, dimension, key, filter) {
 
 // ============================ التصدير PDF ============================
 function exportActivityPdf(id, actorEmpNo) {
-  requireAdmin_(actorEmpNo);
+  var user = requireActiveUser_(actorEmpNo);
+  var activity = getActivityForExport_(id, user);
+  var pdf = buildActivityPdfBlob_(activity);
+  return driveDownloadResponse_(pdf, getReportRoot_(), {});
+}
+
+function exportActivityPdfDownload(id, actorEmpNo) {
+  var user = requireActiveUser_(actorEmpNo);
+  var activity = getActivityForExport_(id, user);
+  var pdf = buildActivityPdfBlob_(activity);
+  return downloadableBlobResponse_(pdf, getReportRoot_(), {}, INLINE_DOWNLOAD_MAX_BYTES);
+}
+
+function getActivityForExport_(id, user) {
   var sh = activitiesSheet_();
   var rowIndex = findRowById_(sh, id);
-  if (rowIndex < 0) return { ok:false, msg:'لم يُعثر على الفعالية.' };
-
+  if (rowIndex < 0) throw new Error('لم يُعثر على الفعالية.');
   var activity = rowObject_(sh, rowIndex);
+  if (user.role !== 'admin' && String(activity.executor_no) !== String(user.emp_no)) {
+    throw new Error('لا يمكنك تحميل سجل مستخدم آخر.');
+  }
   activity.display_type = activityDisplayType_(activity);
+  return activity;
+}
+
+function buildActivityPdfBlob_(activity, fileNameOverride) {
+  activity.display_type = activity.display_type || activityDisplayType_(activity);
   var letter = getOfficialLetterBlob_();
   var letterDataUri = letter ? blobDataUri_(letter) : '';
   var photos = String(activity.photo_ids || '').split(',').filter(Boolean).map(function(pid){
@@ -1014,20 +1041,11 @@ function exportActivityPdf(id, actorEmpNo) {
 
   var html = buildActivityPdfHtml_(activity, letterDataUri, photos);
   var activityTitle = activityTitle_(activity);
-  var fileName = safeFileName_('تقرير ' + formatDate_(activity.event_date) + ' - ' + activityTitle) + '.pdf';
-  var pdf = Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
+  var fileName = fileNameOverride ||
+    (safeFileName_('تقرير ' + formatDate_(activity.event_date) + ' - ' + activityTitle) + '.pdf');
+  return Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
     .getAs(MimeType.PDF)
     .setName(fileName);
-
-  var outFile = getReportRoot_().createFile(pdf);
-  outFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return {
-    ok:true,
-    name:fileName,
-    url:outFile.getUrl(),
-    downloadUrl:'https://drive.google.com/uc?export=download&id=' + outFile.getId(),
-    id:outFile.getId()
-  };
 }
 
 function getReportRoot_() {
@@ -1040,8 +1058,74 @@ function getReportRoot_() {
   return f;
 }
 
+function downloadableBlobResponse_(blob, folder, meta, inlineMaxBytes) {
+  meta = meta || {};
+  var fileName = blob.getName() || meta.name || 'athar-report';
+  blob = blob.setName(fileName);
+  var bytes = blob.getBytes();
+  var base = {
+    ok:true,
+    name:fileName,
+    fileName:fileName,
+    mime:blob.getContentType() || 'application/octet-stream',
+    size:bytes.length
+  };
+  Object.keys(meta).forEach(function(k){ base[k] = meta[k]; });
+  if (bytes.length <= inlineMaxBytes) {
+    base.delivery = 'inline';
+    base.base64 = Utilities.base64Encode(bytes);
+    return base;
+  }
+  var drive = driveDownloadResponse_(blob, folder, meta);
+  drive.size = bytes.length;
+  drive.reason = drive.reason || 'large';
+  return drive;
+}
+
+function driveDownloadResponse_(blob, folder, meta) {
+  meta = meta || {};
+  var fileName = blob.getName() || meta.name || 'athar-report';
+  var outFile = folder.createFile(blob.setName(fileName));
+  outFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  var response = {
+    ok:true,
+    delivery:'drive',
+    name:fileName,
+    fileName:fileName,
+    mime:blob.getContentType() || 'application/octet-stream',
+    url:outFile.getUrl(),
+    downloadUrl:'https://drive.google.com/uc?export=download&id=' + outFile.getId(),
+    id:outFile.getId()
+  };
+  Object.keys(meta).forEach(function(k){ response[k] = meta[k]; });
+  return response;
+}
+
 function exportActivitiesExcel(filter, actorEmpNo) {
   var user = requireActiveUser_(actorEmpNo);
+  var built = buildActivitiesExcelBlob_(filter, user);
+  var response = driveDownloadResponse_(built.blob, getExcelReportRoot_(), {
+    count:built.count,
+    period:built.period
+  });
+  response.count = built.count;
+  response.period = built.period;
+  return response;
+}
+
+function exportActivitiesExcelDownload(filter, actorEmpNo) {
+  var user = requireActiveUser_(actorEmpNo);
+  var built = buildActivitiesExcelBlob_(filter, user);
+  var response = downloadableBlobResponse_(built.blob, getExcelReportRoot_(), {
+    count:built.count,
+    period:built.period
+  }, INLINE_DOWNLOAD_MAX_BYTES);
+  response.count = built.count;
+  response.period = built.period;
+  return response;
+}
+
+function buildActivitiesExcelBlob_(filter, user) {
   var period = normalizePeriodFilter_(filter);
   var periodLabel = periodLabel_(period);
   var rows = filterActivityRows_(getVisibleActivityRows_(user), period);
@@ -1093,23 +1177,51 @@ function exportActivitiesExcel(filter, actorEmpNo) {
 
   var fileName = safeFileName_('تقرير أثر - ' + (user.name || user.emp_no) + ' - ' + periodLabel) + '.xlsx';
   var tempId = temp.getId();
-  var outFile;
   try {
     var blob = exportSpreadsheetAsXlsx_(tempId, fileName);
-    outFile = getExcelReportRoot_().createFile(blob);
-    outFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return { blob:blob, count:rows.length, period:periodLabel };
   } finally {
     try { DriveApp.getFileById(tempId).setTrashed(true); } catch (e2) {}
   }
-  return {
-    ok:true,
-    name:fileName,
-    url:outFile.getUrl(),
-    downloadUrl:'https://drive.google.com/uc?export=download&id=' + outFile.getId(),
-    id:outFile.getId(),
+}
+
+function exportActivitiesZipDownload(filter, actorEmpNo, options) {
+  var user = requireActiveUser_(actorEmpNo);
+  options = options || {};
+  var period = normalizePeriodFilter_(filter);
+  if (options.scope === 'year') {
+    var year = parseInt(options.year, 10);
+    if (!year) {
+      year = period.mode === 'all' ? new Date().getFullYear() : period.year;
+    }
+    period = { mode:'year', year:year, month:1, quarter:1, half:1 };
+  }
+  var periodLabel = periodLabel_(period);
+  var rows = filterActivityRows_(getVisibleActivityRows_(user), period);
+  rows.sort(function(a,b){ return new Date(a.event_date) - new Date(b.event_date); });
+  if (!rows.length) return { ok:false, msg:'لا توجد فعاليات ضمن الفترة المختارة.' };
+  if (rows.length > ZIP_DRIVE_MAX_COUNT) {
+    return { ok:false, msg:'عدد التقارير كبير جدًا للتجهيز دفعة واحدة. اختر فترة أصغر أو صدّر Excel.' };
+  }
+
+  var blobs = rows.map(function(o){
+    o.display_type = activityDisplayType_(o);
+    var entryName = safeFileName_(
+      formatDate_(o.event_date) + ' - ' + activityTitle_(o) + ' - ' + (o.executor_name || '')
+    ) + '.pdf';
+    return buildActivityPdfBlob_(o, entryName);
+  });
+  var zipName = safeFileName_('تقارير أثر - ' + (user.name || user.emp_no) + ' - ' + periodLabel) + '.zip';
+  var zip = Utilities.zip(blobs, zipName).setName(zipName);
+  var inlineLimit = rows.length > ZIP_INLINE_MAX_COUNT ? 0 : ZIP_INLINE_DOWNLOAD_MAX_BYTES;
+  var response = downloadableBlobResponse_(zip, getReportRoot_(), {
     count:rows.length,
     period:periodLabel
-  };
+  }, inlineLimit);
+  response.count = rows.length;
+  response.period = periodLabel;
+  if (rows.length > ZIP_INLINE_MAX_COUNT && response.delivery === 'drive') response.reason = 'count';
+  return response;
 }
 
 function getExcelReportRoot_() {
