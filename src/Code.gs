@@ -1310,19 +1310,22 @@ function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
     pdfRow_('ملاحظات', a.notes);
 
   var bgImg = letterDataUri ? '<img class="page-bg" src="' + letterDataUri + '">' : '';
+  
+  var headerHtml = '<div class="pdf-header">المديرية العامة للخدمات الصحية بمحافظة ظفار<br>التجمع الصحي (2)- مركز حاسك الصحي</div>';
+  var footerHtml = '<div class="pdf-footer"><div class="appr">اعتماد:</div><div class="prep">تم الاعداد : ' + html_(a.executor_name) + '</div></div>';
 
   var pages = [];
-  pages.push('<section class="page">' + bgImg + '<main class="content first"><h1>تقرير توثيق فعالية</h1>' + details + '</main></section>');
+  pages.push('<section class="page">' + bgImg + headerHtml + '<main class="content first"><h1>تقرير توثيق فعالية</h1>' + details + '</main>' + footerHtml + '</section>');
 
   for (var i = 0; i < photoDataUris.length; i += 4) {
     var chunk = photoDataUris.slice(i, i + 4).map(function(src, n){
       return '<figure><img src="' + src + '"><figcaption>صورة ' + (i + n + 1) + '</figcaption></figure>';
     }).join('');
-    pages.push('<section class="page">' + bgImg + '<main class="content photos"><h2>' + html_(title) + '</h2><div class="photo-list">' + chunk + '</div></main></section>');
+    pages.push('<section class="page">' + bgImg + headerHtml + '<main class="content photos"><h2>' + html_(title) + '</h2><div class="photo-list">' + chunk + '</div></main></section>');
   }
 
   var pageBgCss = letterDataUri ? '' : 'background:#fff;border:1px solid #dfe4ea;';
   return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
-    '<style>@page{size:A4;margin:0}html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#1d2733}.page{width:210mm;height:297mm;position:relative;box-sizing:border-box;page-break-after:always;' + pageBgCss + 'overflow:hidden}.page:last-child{page-break-after:auto}.page-bg{position:absolute;top:0;left:0;width:210mm;height:297mm;z-index:-1;object-fit:cover;display:block}.content{position:absolute;inset:55mm 15mm 25mm 15mm;z-index:1}.first h1{font-size:18pt;margin:0 0 8mm;text-align:center;color:#123a46}.row{display:grid;grid-template-columns:36mm 1fr;gap:5mm;border-bottom:1px solid #dfe4ea;padding:3.3mm 0;font-size:10.5pt;line-height:1.55}.row span{color:#5b6b7b;font-weight:bold}.row b{font-weight:500;white-space:pre-wrap}.photos h2{font-size:14pt;margin:0 0 6mm;text-align:center;color:#123a46}.photo-list{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:minmax(100px, 1fr);gap:10mm;height:190mm}figure{margin:0;border:1px solid #dfe4ea;padding:2.5mm;background:rgba(255,255,255,.92);display:flex;flex-direction:column;gap:1.5mm;box-shadow:0 2px 6px rgba(0,0,0,.05)}figure img{width:100%;height:80mm;object-fit:contain}figcaption{text-align:center;color:#5b6b7b;font-size:10pt;font-weight:bold}</style>' +
+    '<style>@page{size:A4;margin:0}html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#1d2733}.page{width:210mm;height:297mm;position:relative;box-sizing:border-box;page-break-after:always;' + pageBgCss + 'overflow:hidden}.page:last-child{page-break-after:auto}.page-bg{position:absolute;top:0;left:0;width:210mm;height:297mm;z-index:-1;object-fit:cover;display:block}.pdf-header{position:absolute;top:38mm;right:15mm;font-size:12pt;font-weight:bold;color:#123a46;text-align:right;line-height:1.4;z-index:2}.pdf-footer{position:absolute;bottom:20mm;left:15mm;right:15mm;font-size:12.5pt;color:#123a46;z-index:2}.pdf-footer .prep{position:absolute;right:0;bottom:0;font-weight:bold}.pdf-footer .appr{position:absolute;left:0;bottom:0;font-weight:bold}.content{position:absolute;inset:55mm 15mm 30mm 15mm;z-index:1}.first h1{font-size:19pt;margin:0 0 8mm;text-align:center;color:#123a46}.row{display:grid;grid-template-columns:38mm 1fr;gap:5mm;border-bottom:1px solid #dfe4ea;padding:3.8mm 0;font-size:11.5pt;line-height:1.6}.row span{color:#5b6b7b;font-weight:bold}.row b{font-weight:500;white-space:pre-wrap}.photos h2{font-size:15pt;margin:0 0 6mm;text-align:center;color:#123a46}.photo-list{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:minmax(100px, 1fr);gap:10mm;height:190mm}figure{margin:0;border:1px solid #dfe4ea;padding:2.5mm;background:rgba(255,255,255,.92);display:flex;flex-direction:column;gap:1.5mm;box-shadow:0 2px 6px rgba(0,0,0,.05)}figure img{width:100%;height:80mm;object-fit:contain}figcaption{text-align:center;color:#5b6b7b;font-size:11pt;font-weight:bold}</style>' +
     '</head><body>' + pages.join('') + '</body></html>';
 }

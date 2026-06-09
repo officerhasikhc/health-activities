@@ -160,7 +160,7 @@ function resetIdleTimer(){
   clearTimeout(idleTimer);
   touchSession();
   idleTimer=setTimeout(function(){
-    forceLogout('انتهت الجلسة بسبب عدم التفاعل لمدة 10 دقائق. سجّل الدخول مرة أخرى.');
+    forceLogout('');
   }, IDLE_LIMIT_MS);
 }
 function bootstrapAuth(){
