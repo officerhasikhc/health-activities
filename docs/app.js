@@ -817,8 +817,7 @@ function renderRecords(){
     '<div class="filters action-filters">'+
       '<div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadRecords(true)">تحديث</button></div>'+
       '<div class="field" style="justify-content:flex-end"><button class="btn btn-excel btn-sm" id="excelBtn" onclick="exportExcel()" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تصدير Excel</button></div>'+
-      '<div class="field" style="justify-content:flex-end"><button class="btn btn-zip btn-sm" id="zipFilterBtn" onclick="exportZip(\'filter\')" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تحميل ZIP حسب الفلتر</button></div>'+
-      '<div class="field" style="justify-content:flex-end"><button class="btn btn-zip btn-sm" id="zipYearBtn" onclick="exportZip(\'year\')" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تحميل ZIP للسنة</button></div>'+
+      '<div class="field" style="justify-content:flex-end"><button class="btn btn-zip btn-sm" id="zipBtn" onclick="exportZip()" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تحميل ZIP</button></div>'+
     '</div>'+
     '<div id="recList"><div class="loading"><span class="spin"></span> جارٍ التحميل…</div></div>'+
   '</div>';
@@ -914,7 +913,7 @@ function paintRecords(list){
       '<div class="ops">'+
         '<button class="btn btn-view btn-sm" onclick="viewActivity(\''+o.id+'\')"><span class="ico">◉</span> عرض</button>'+
         (isPending?'':'<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>')+
-        (isPending?'':'<button class="btn btn-print btn-sm" id="pdfBtn_'+escAttr(o.id)+'" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⎙</span> تحميل PDF</button>')+
+        (isPending?'':'<button class="btn btn-print btn-sm" id="pdfBtn_'+escAttr(o.id)+'" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⤓</span> تحميل PDF</button>')+
         (isPending?'':'<button class="btn btn-danger-outline btn-sm" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>')+
       '</div></div>';
   }).join('');
@@ -1027,14 +1026,13 @@ function exportExcel(){
     toast((e&&e.message)||'تعذّر إنشاء Excel.','err');
   });
 }
-function exportZip(scope){
-  var btn=document.getElementById(scope==='year'?'zipYearBtn':'zipFilterBtn');
+function exportZip(){
+  var btn=document.getElementById('zipBtn');
   var filter=periodFilter('fl');
   var cached=REC_CACHE[filterKey(filter)];
-  var label=(scope==='year')?'جارٍ تجهيز ملفات السنة…':
-    (cached&&cached.length?'تجهيز '+cached.length+' ملفات…':'جارٍ تجهيز الملفات…');
+  var label=(cached&&cached.length?'تجهيز '+cached.length+' ملفات…':'جارٍ تجهيز الملفات…');
   setBusy(btn, label);
-  var options = scope==='year' ? { scope:'year', year:(filter.mode==='all'?currentPeriod().year:filter.year) } : { scope:'filter' };
+  var options = { scope:'filter' };
   run('exportActivitiesZipDownload', filter, USER.no, options).then(function(r){
     restoreBusy(btn);
     if(r&&r.ok) handleDownloadResponse(r, 'ZIP');
