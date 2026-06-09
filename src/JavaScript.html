@@ -14,6 +14,7 @@ var SESSION_KEY = 'athar_session';
 var SUBMITTING = false;
 var PHOTO_VIEW = { ids:[], index:0, title:'' };
 var AR_MONTHS_UI = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+var PENDING_RECORD_FILTER = null;
 var _lastSessionTouch = 0;
 var IDLE_LIMIT_MS = 10 * 60 * 1000;
 var idleTimer = null;
@@ -237,12 +238,11 @@ function yearOptions(sel){
 function periodControlsHtml(prefix){
   var p=currentPeriod();
   return '<div class="filters period-filters">'+
-    '<div class="field"><label>الفترة</label><select id="'+prefix+'_mode" onchange="onPeriodModeChange(\''+prefix+'\',true)">'+
-      '<option value="current_month">الشهر الحالي</option>'+
-      '<option value="month">شهر محدد</option>'+
+    '<div class="field"><label>نوع الفترة</label><select id="'+prefix+'_mode" onchange="onPeriodModeChange(\''+prefix+'\',true)">'+
+      '<option value="month">الشهر</option>'+
       '<option value="quarter">ربع السنة</option>'+
       '<option value="half">نصف السنة</option>'+
-      '<option value="year">السنة كاملة</option>'+
+      '<option value="year">السنة</option>'+
       '<option value="all">كل السجلات</option>'+
     '</select></div>'+
     '<div class="field period-year" id="'+prefix+'_yearWrap"><label>السنة</label><select id="'+prefix+'_year" onchange="periodReload(\''+prefix+'\')">'+yearOptions(p.year)+'</select></div>'+
@@ -257,14 +257,17 @@ function periodControlsHtml(prefix){
     '</select></div>'+
   '</div>';
 }
-function initPeriodControls(prefix){
-  var p=currentPeriod();
+function initPeriodControls(prefix, initial){
+  var p=Object.assign(currentPeriod(), initial||{});
+  var mode=document.getElementById(prefix+'_mode'); if(mode) mode.value=p.mode||'month';
+  var y=document.getElementById(prefix+'_year'); if(y) y.value=String(p.year);
+  var m=document.getElementById(prefix+'_month'); if(m) m.value=String(p.month);
   var q=document.getElementById(prefix+'_quarter'); if(q) q.value=String(p.quarter);
   var h=document.getElementById(prefix+'_half'); if(h) h.value=String(p.half);
   onPeriodModeChange(prefix,false);
 }
 function onPeriodModeChange(prefix, reload){
-  var mode=val(prefix+'_mode')||'current_month';
+  var mode=val(prefix+'_mode')||'month';
   function toggle(id,on){ var el=document.getElementById(prefix+'_'+id+'Wrap'); if(el) el.classList.toggle('hidden', !on); }
   toggle('year', ['month','quarter','half','year'].indexOf(mode)>-1);
   toggle('month', mode==='month');
@@ -278,21 +281,48 @@ function periodReload(prefix){
 }
 function periodFilter(prefix){
   var p=currentPeriod();
-  var mode=val(prefix+'_mode')||'current_month';
+  var mode=val(prefix+'_mode')||'month';
   return {
     mode: mode,
     year: parseInt(val(prefix+'_year'),10)||p.year,
-    month: mode==='current_month' ? p.month : (parseInt(val(prefix+'_month'),10)||p.month),
+    month: parseInt(val(prefix+'_month'),10)||p.month,
     quarter: parseInt(val(prefix+'_quarter'),10)||p.quarter,
     half: parseInt(val(prefix+'_half'),10)||p.half
   };
 }
 function periodKey(prefix){ return JSON.stringify(periodFilter(prefix)); }
+function dateParts(s){
+  var m=String(s||'').match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if(m) return { year:parseInt(m[1],10), month:parseInt(m[2],10), day:parseInt(m[3],10) };
+  var d=new Date(s);
+  if(!isNaN(d)) return { year:d.getFullYear(), month:d.getMonth()+1, day:d.getDate() };
+  return null;
+}
+function displayDate(s){
+  var p=dateParts(s);
+  if(!p) return s||'';
+  return p.year+'/'+('0'+p.month).slice(-2)+'/'+('0'+p.day).slice(-2);
+}
+function filterFromDate(s){
+  var p=dateParts(s)||currentPeriod();
+  return { mode:'month', year:p.year, month:p.month, quarter:Math.floor((p.month-1)/3)+1, half:p.month<=6?1:2 };
+}
+function recordMatchesFilter(o, filter){
+  filter=filter||currentPeriod();
+  if(filter.mode==='all') return true;
+  var p=dateParts(o.event_date);
+  if(!p) return false;
+  if(filter.mode==='month') return p.year===filter.year && p.month===filter.month;
+  if(filter.mode==='quarter') return p.year===filter.year && Math.floor((p.month-1)/3)+1===filter.quarter;
+  if(filter.mode==='half') return p.year===filter.year && (p.month<=6?1:2)===filter.half;
+  if(filter.mode==='year') return p.year===filter.year;
+  return true;
+}
 
 /* ====================== نموذج التسجيل ====================== */
 function newForm(){
   return { id:null, type:'', type_custom:'', world_day:'', title:'', objective:'',
-    target_groups:[], event_date:'', location:'', mechanism:'', mechanisms:[],
+    target_groups:[], event_date:todayIso(), location:'', mechanism:'', mechanisms:[],
     beneficiaries:'', has_partnership:false, partners:[],
     photos:[], existing_photo_ids:[], photo_folder_id:'', notes:'', client_request_id:'',
     executor_no:USER.no, executor_name:USER.name };
@@ -581,23 +611,26 @@ function submitForm(){
 
   if(Outbox.available){
     if(Outbox.setActive) Outbox.setActive(payload,true);
-    // 1) حفظ محلي فوري  2) محاولة الرفع
     Outbox.add(payload).then(function(localId){
       clearDraft(); updatePending();
+      rememberSavedPeriod(payload);
+      onSavedLocal('حُفظت على الجهاز، وجارٍ رفعها في الخلفية.');
       run('saveActivity', payload, USER.no).then(function(r){
         if(r && r.ok){
           Outbox.remove(localId).then(function(){
             if(Outbox.setActive) Outbox.setActive(payload,false);
-            onSaved(okMsg);
+            invalidateCaches(); updatePending();
+            toast(okMsg, 'ok');
+            if(document.getElementById('recList')) loadRecords(true);
           });
         }
         else {
           if(Outbox.setActive) Outbox.setActive(payload,false);
-          onSavedLocal();
+          updatePending();
         }
       }).catch(function(){
         if(Outbox.setActive) Outbox.setActive(payload,false);
-        onSavedLocal();
+        updatePending();
       });
     }).catch(function(){
       if(Outbox.setActive) Outbox.setActive(payload,false);
@@ -666,10 +699,11 @@ function directSave(payload,btn,okMsg){
     toast('انقطع الاتصال. بياناتك محفوظة كمسودة، أعد المحاولة.','err');
   });
 }
-function onSaved(msg){ SUBMITTING=false; if(FORM) FORM._new_unsaved=false; invalidateCaches(); updatePending(); toast(msg,'ok'); show('records'); }
-function onSavedLocal(){ invalidateCaches(); updatePending();
+function rememberSavedPeriod(payload){ PENDING_RECORD_FILTER=filterFromDate(payload && payload.event_date); }
+function onSaved(msg){ SUBMITTING=false; if(FORM) FORM._new_unsaved=false; rememberSavedPeriod(FORM); invalidateCaches(); updatePending(); toast(msg,'ok'); show('records'); }
+function onSavedLocal(msg){ invalidateCaches(); updatePending();
   SUBMITTING=false;
-  toast('حُفظت محليًا وستُرفع تلقائيًا عند توفّر الاتصال.','ok'); show('records'); }
+  toast(msg||'حُفظت محليًا وستُرفع تلقائيًا عند توفّر الاتصال.','ok'); show('records'); }
 
 function resetForm(){
   confirmModal('تفريغ النموذج','سيُمسح ما أدخلته في هذا النموذج. متابعة؟',function(){
@@ -690,7 +724,9 @@ function renderRecords(){
     '</div>'+
     '<div id="recList"><div class="loading"><span class="spin"></span> جارٍ التحميل…</div></div>'+
   '</div>';
-  initPeriodControls('fl');
+  var initial=PENDING_RECORD_FILTER;
+  PENDING_RECORD_FILTER=null;
+  initPeriodControls('fl', initial);
   loadRecords();
 }
 function loadRecords(force){
@@ -699,11 +735,46 @@ function loadRecords(force){
   if(!force && REC_CACHE[key]){ paintRecords(REC_CACHE[key]); return; }
   document.getElementById('recList').innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
   run('getActivities', USER.no, filter).then(function(list){
-    REC_CACHE[key]=list; paintRecords(list);
+    mergePendingRecords(list, filter).then(function(merged){
+      REC_CACHE[key]=merged; paintRecords(merged);
+    });
   }).catch(function(e){
     var box=document.getElementById('recList');
     if(box) box.innerHTML='<div class="empty">تعذّر تحميل السجل: '+esc((e&&e.message)||'خطأ غير معروف')+'<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadRecords(true)">إعادة المحاولة</button></div>';
   });
+}
+function mergePendingRecords(list, filter){
+  list=list||[];
+  if(!window.Outbox || !Outbox.available || !Outbox.all) return Promise.resolve(list);
+  return Outbox.all().then(function(items){
+    var seen={};
+    list.forEach(function(o){ seen[o.id]=true; });
+    var pending=items.map(function(it){ return pendingRecordFromPayload(it.payload); })
+      .filter(function(o){ return o && !seen[o.id] && recordMatchesFilter(o, filter); });
+    pending.sort(function(a,b){ return String(b.event_date).localeCompare(String(a.event_date)); });
+    return pending.concat(list);
+  }).catch(function(){ return list; });
+}
+function pendingRecordFromPayload(p){
+  if(!p) return null;
+  var parts=dateParts(p.event_date);
+  var month=parts&&parts.month;
+  var photoCount=(p.photos&&p.photos.length?p.photos.length:0)+(p.existing_photo_ids&&p.existing_photo_ids.length?p.existing_photo_ids.length:0);
+  return {
+    id:p.id||p.client_request_id,
+    type:p.type, type_custom:p.type_custom||'', display_type:p.type==='أخرى'?(p.type_custom||p.type):p.type,
+    world_day:p.world_day||'', title:p.type==='يوم عالمي'?(p.world_day||p.title):p.title,
+    objective:p.objective||'', target_groups:(p.target_groups||[]).join?p.target_groups.join(' ، '):(p.target_groups||''),
+    event_date:displayDate(p.event_date), month_name:month?AR_MONTHS_UI[month-1]:'',
+    quarter:month?('الربع '+['الأول','الثاني','الثالث','الرابع'][Math.floor((month-1)/3)]):'',
+    executor_no:p.executor_no||USER.no, executor_name:p.executor_name||USER.name, location:p.location||'',
+    mechanism:p.mechanism||((p.mechanisms||[]).join?p.mechanisms.join(' ، '):''), beneficiaries:p.beneficiaries||'',
+    has_partnership:p.has_partnership, partners:(p.partners||[]).join?p.partners.join(' ، '):(p.partners||''),
+    notes:p.notes||'', photo_ids:(p.existing_photo_ids||[]).slice(), photo_folder_id:p.photo_folder_id||'',
+    status:'محفوظ محليًا',
+    pending_photos_count:photoCount, local_thumb:(p.photos&&p.photos[0]&&p.photos[0].data)?p.photos[0].data:'',
+    local_photos:(p.photos||[]).map(function(x){ return x.data; }), _pending:true
+  };
 }
 function paintRecords(list){
   var box=document.getElementById('recList');
@@ -713,9 +784,14 @@ function paintRecords(list){
     window._recs[o.id]=o;
     var typeLabel=o.display_type||o.type;
     var firstId=(o.photo_ids&&o.photo_ids.length)?o.photo_ids[0]:'';
-    var thumb=firstId
+    var isPending=o._pending||o.status==='جارٍ رفع الصور';
+    var photoCount=o._pending?(o.pending_photos_count||0):(o.photo_ids?o.photo_ids.length:0);
+    var thumb=o.local_thumb
+      ? '<div class="rec-thumb" onclick="viewActivity(\''+o.id+'\')"><img loading="lazy" src="data:image/jpeg;base64,'+o.local_thumb+'">'+
+        (photoCount>1?'<span class="rec-thumb-count">'+photoCount+'</span>':'')+'</div>'
+      : firstId
       ? '<div class="rec-thumb" onclick="viewActivity(\''+o.id+'\')"><img loading="lazy" src="https://drive.google.com/thumbnail?id='+firstId+'&sz=w300">'+
-        (o.photo_ids.length>1?'<span class="rec-thumb-count">'+o.photo_ids.length+'</span>':'')+'</div>'
+        (photoCount>1?'<span class="rec-thumb-count">'+photoCount+'</span>':'')+'</div>'
       : '<div class="rec-thumb rec-thumb-empty" onclick="viewActivity(\''+o.id+'\')"><span>لا صور</span></div>';
     return '<div class="rec">'+
       thumb+
@@ -723,27 +799,32 @@ function paintRecords(list){
         '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
         '<div class="row2">'+
           '<span class="badge">'+esc(typeLabel)+'</span>'+
+          (isPending?'<span class="badge pending-badge">'+(o._pending?'بانتظار الرفع':'جارٍ رفع الصور')+'</span>':'')+
           ((o.has_partnership===true||o.has_partnership==='true')?'<span class="badge part">شراكة</span>':'')+
         '</div>'+
         '<div class="rec-facts">'+
           '<span class="fact"><i>التاريخ</i>'+esc(o.event_date)+'</span>'+
           (USER.role==='admin'?'<span class="fact"><i>المنفّذة</i>'+esc(o.executor_name)+'</span>':'')+
           (o.beneficiaries?'<span class="fact"><i>المستفيدون</i>'+esc(o.beneficiaries)+'</span>':'')+
-          (o.photo_ids.length?'<span class="fact"><i>الصور</i>'+o.photo_ids.length+'</span>':'')+
+          (photoCount?'<span class="fact"><i>الصور</i>'+photoCount+'</span>':'')+
         '</div>'+
       '</div>'+
       '<div class="ops">'+
         '<button class="btn btn-view btn-sm" onclick="viewActivity(\''+o.id+'\')"><span class="ico">◉</span> عرض</button>'+
-        '<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>'+
-        (USER.role==='admin'?'<button class="btn btn-print btn-sm" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⎙</span> طباعة PDF</button>':'')+
-        '<button class="btn btn-danger-outline btn-sm" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>'+
+        (isPending?'':'<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>')+
+        (!isPending&&USER.role==='admin'?'<button class="btn btn-print btn-sm" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⎙</span> طباعة PDF</button>':'')+
+        (isPending?'':'<button class="btn btn-danger-outline btn-sm" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>')+
       '</div></div>';
   }).join('');
 }
 
 function viewActivity(id){
   var o=window._recs[id]; if(!o) return;
-  var photos=(o.photo_ids||[]).map(function(pid){
+  var localPhotos=(o.local_photos||[]).map(function(data,i){
+    return '<button class="photo-thumb photo-open" onclick="openLocalPhotoViewer(window._recs[\''+id+'\'].local_photos,'+i+',\''+escAttr(o.title)+'\')">'+
+      '<img loading="lazy" src="data:image/jpeg;base64,'+data+'"></button>';
+  }).join('');
+  var photos=localPhotos+(o.photo_ids||[]).map(function(pid){
     var i=(o.photo_ids||[]).indexOf(pid);
     return '<button class="photo-thumb photo-open" onclick="openPhotoViewer(window._recs[\''+id+'\'].photo_ids,'+i+',\''+escAttr(o.title)+'\')">'+
       '<img loading="lazy" src="https://drive.google.com/thumbnail?id='+pid+'&sz=w300"></button>';
@@ -757,14 +838,19 @@ function viewActivity(id){
     dl('المكان', o.location)+ dl('آلية التنفيذ', o.mechanism)+
     dl('عدد المستفيدين', o.beneficiaries)+ dl('المنفّذة', o.executor_name)+
     ((o.has_partnership===true||o.has_partnership==='true')?dl('الجهات المشاركة', o.partners):'')+
+    (o._pending?dl('الحالة','محفوظ محليًا - بانتظار الرفع'):(o.status==='جارٍ رفع الصور'?dl('الحالة','جارٍ رفع الصور'):''))+
     (o.notes?dl('ملاحظات', o.notes):'')+
     (photos?'<div style="margin-top:14px"><label>الصور</label><div class="photo-grid">'+photos+'</div></div>':'');
   openModal(o.title, body,
     '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
     '<button class="btn btn-primary" onclick="closeModal();editActivity(\''+id+'\')">تعديل</button>');
 }
+function openLocalPhotoViewer(images,index,title){
+  PHOTO_VIEW={ ids:(images||[]).slice(), index:index||0, title:title||'الصور', local:true };
+  paintPhotoViewer();
+}
 function openPhotoViewer(ids,index,title){
-  PHOTO_VIEW={ ids:(ids||[]).slice(), index:index||0, title:title||'الصور' };
+  PHOTO_VIEW={ ids:(ids||[]).slice(), index:index||0, title:title||'الصور', local:false };
   paintPhotoViewer();
 }
 function movePhoto(step){
@@ -776,8 +862,9 @@ function paintPhotoViewer(){
   var ids=PHOTO_VIEW.ids||[];
   var pid=ids[PHOTO_VIEW.index];
   if(!pid) return;
+  var src=PHOTO_VIEW.local?('data:image/jpeg;base64,'+pid):('https://drive.google.com/thumbnail?id='+escAttr(pid)+'&sz=w1600');
   var body='<div class="photo-viewer">'+
-    '<img src="https://drive.google.com/thumbnail?id='+escAttr(pid)+'&sz=w1600" alt="صورة الفعالية">'+
+    '<img src="'+src+'" alt="صورة الفعالية">'+
     '<div class="photo-count">'+(PHOTO_VIEW.index+1)+' / '+ids.length+'</div>'+
   '</div>';
   var nav=ids.length>1
@@ -786,7 +873,7 @@ function paintPhotoViewer(){
   openModal(PHOTO_VIEW.title||'الصور', body,
     '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
     nav+
-    '<a class="btn btn-primary" target="_blank" rel="noopener" href="https://drive.google.com/file/d/'+escAttr(pid)+'/view">فتح الأصل</a>');
+    (PHOTO_VIEW.local?'':'<a class="btn btn-primary" target="_blank" rel="noopener" href="https://drive.google.com/file/d/'+escAttr(pid)+'/view">فتح الأصل</a>'));
 }
 function editActivity(id){
   var o=window._recs[id]; if(!o) return;
@@ -1057,6 +1144,7 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
 function escAttr(s){ return esc(s).replace(/'/g,'&#39;'); }
 function dl(k,v){ if(v==null||v==='') return ''; return '<div class="dl-row"><span>'+k+'</span><span>'+esc(v)+'</span></div>'; }
 function nowTime(){ var d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+function todayIso(){ var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
 function isoDate(s){ if(!s) return ''; var p=String(s).split('/'); if(p.length===3) return p[0]+'-'+('0'+p[1]).slice(-2)+'-'+('0'+p[2]).slice(-2); return s; }
 function splitList(s){ return String(s||'').split(/[،,]/).map(function(x){return x.trim();}).filter(Boolean); }
 

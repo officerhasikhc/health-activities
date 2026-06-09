@@ -149,6 +149,7 @@ function syncOutbox() {
   Outbox.flush().then(function (r) {
     updatePending();
     if (r.sent > 0) {
+      if (typeof invalidateCaches === 'function') invalidateCaches();
       toast('تم رفع ' + r.sent + ' فعالية محفوظة محليًا.', 'ok');
       if (typeof loadRecords === 'function' && document.getElementById('recList')) loadRecords(true);
     }

@@ -191,6 +191,7 @@
   .badge{display:inline-block;background:#eef2f4;border:1px solid var(--line);
     border-radius:5px;padding:3px 10px;font-size:12px;color:var(--brand-deep);font-weight:600}
   .badge.part{background:#f4efe2;border-color:#e3d6b5;color:var(--accent)}
+  .badge.pending-badge{background:#fff7e6;border-color:#e6c982;color:#7a5a15}
   .rec .ops{display:flex;gap:6px;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-start}
   .empty{text-align:center;color:var(--muted);padding:40px 0;font-size:13.5px}
 

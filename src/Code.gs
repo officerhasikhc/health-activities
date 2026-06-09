@@ -668,19 +668,23 @@ function saveActivityLocked_(payload, actorEmpNo) {
 
   var sh = activitiesSheet_();
   var requestId = String(payload.client_request_id || '').trim();
+  var duplicateRowIndex = -1;
   if (requestId) {
-    var duplicateRowIndex = findRowByClientRequestId_(sh, requestId);
+    duplicateRowIndex = findRowByClientRequestId_(sh, requestId);
     if (duplicateRowIndex > 0) {
       var duplicate = rowObject_(sh, duplicateRowIndex);
       if (!isAdmin && String(duplicate.executor_no) !== String(actor.emp_no)) {
         return { ok:false, msg:'لا يمكنك تعديل سجل مستخدم آخر.' };
       }
-      return { ok:true, id:duplicate.id, deduped:true };
+      if (!(String(duplicate.status || '') === 'جارٍ رفع الصور' && payload.photos && payload.photos.length)) {
+        return { ok:true, id:duplicate.id, deduped:true };
+      }
+      payload.id = duplicate.id;
     }
   }
 
   var id = payload.id || ('ACT-' + Date.now());
-  var oldRowIndex = findRowById_(sh, id);
+  var oldRowIndex = duplicateRowIndex > 0 ? duplicateRowIndex : findRowById_(sh, id);
   var isNew = oldRowIndex < 0;
   var oldRow = oldRowIndex > 0 ? rowObject_(sh, oldRowIndex) : null;
 
@@ -706,24 +710,9 @@ function saveActivityLocked_(payload, actorEmpNo) {
   var quarter = 'الربع ' + ['الأول','الثاني','الثالث','الرابع'][Math.floor((month-1)/3)];
   var mechanisms = storedList_(payload.mechanisms || payload.mechanism);
 
-  // رفع الصور (إن وُجدت صور جديدة base64)
   var folderId = payload.photo_folder_id || '';
   var photoIds = payload.existing_photo_ids ? payload.existing_photo_ids.slice() : [];
-  if (payload.photos && payload.photos.length) {
-    if (!folderId) {
-      var root = DriveApp.getFolderById(PROP.getProperty('PHOTO_ROOT_ID'));
-      var sub = root.createFolder(id + ' - ' + (payload.title || '').substring(0,40));
-      folderId = sub.getId();
-    }
-    var folder = DriveApp.getFolderById(folderId);
-    payload.photos.forEach(function(p, idx){
-      var bytes = Utilities.base64Decode(p.data);
-      var blob = Utilities.newBlob(bytes, p.mime || 'image/jpeg', p.name || (id+'_'+idx+'.jpg'));
-      var file = folder.createFile(blob);
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      photoIds.push(file.getId());
-    });
-  }
+  var hasNewPhotos = !!(payload.photos && payload.photos.length);
 
   var row = {
     id: id,
@@ -748,20 +737,43 @@ function saveActivityLocked_(payload, actorEmpNo) {
     photo_folder_id: folderId,
     photo_ids: photoIds.join(','),
     notes: payload.notes || '',
-    status: 'محفوظ',
+    status: hasNewPhotos ? 'جارٍ رفع الصور' : 'محفوظ',
     client_request_id: requestId || ((oldRow && oldRow.client_request_id) || '')
   };
 
-  var values = ACT_HEADERS.map(function(h){ return row[h]; });
+  var rowIndex = writeActivityRow_(sh, row, oldRowIndex);
 
-  if (isNew) {
-    sh.appendRow(values);
-  } else {
-    var rowIndex = oldRowIndex;
-    if (rowIndex < 0) { sh.appendRow(values); }
-    else { sh.getRange(rowIndex, 1, 1, values.length).setValues([values]); }
+  // رفع الصور بعد تثبيت الصف حتى يظهر النشاط في السجل حتى لو كان الاتصال بطيئًا.
+  if (hasNewPhotos) {
+    if (!folderId) {
+      var root = DriveApp.getFolderById(PROP.getProperty('PHOTO_ROOT_ID'));
+      var sub = root.createFolder(id + ' - ' + (payload.title || '').substring(0,40));
+      folderId = sub.getId();
+    }
+    var folder = DriveApp.getFolderById(folderId);
+    payload.photos.forEach(function(p, idx){
+      var bytes = Utilities.base64Decode(p.data);
+      var blob = Utilities.newBlob(bytes, p.mime || 'image/jpeg', p.name || (id+'_'+idx+'.jpg'));
+      var file = folder.createFile(blob);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      photoIds.push(file.getId());
+    });
+    row.photo_folder_id = folderId;
+    row.photo_ids = photoIds.join(',');
+    row.status = 'محفوظ';
+    writeActivityRow_(sh, row, rowIndex);
   }
   return { ok:true, id:id };
+}
+
+function writeActivityRow_(sh, row, rowIndex) {
+  var values = ACT_HEADERS.map(function(h){ return row[h]; });
+  if (rowIndex && rowIndex > 0) {
+    sh.getRange(rowIndex, 1, 1, values.length).setValues([values]);
+    return rowIndex;
+  }
+  sh.appendRow(values);
+  return sh.getLastRow();
 }
 
 function missingRequiredFields_(payload) {
@@ -816,16 +828,16 @@ function findRowByClientRequestId_(sh, requestId) {
 
 function normalizePeriodFilter_(filterOrYear, month) {
   var now = new Date();
-  var current = { mode:'current_month', year:now.getFullYear(), month:now.getMonth() + 1 };
+  var current = { mode:'month', year:now.getFullYear(), month:now.getMonth() + 1 };
   if (filterOrYear && typeof filterOrYear === 'object') {
     var f = {
-      mode: String(filterOrYear.mode || 'current_month'),
+      mode: String(filterOrYear.mode || 'month'),
       year: parseInt(filterOrYear.year, 10) || current.year,
       month: parseInt(filterOrYear.month, 10) || current.month,
       quarter: parseInt(filterOrYear.quarter, 10) || Math.floor((current.month - 1) / 3) + 1,
       half: parseInt(filterOrYear.half, 10) || (current.month <= 6 ? 1 : 2)
     };
-    if (['current_month','month','quarter','half','year','all'].indexOf(f.mode) < 0) f.mode = 'current_month';
+    if (['current_month','month','quarter','half','year','all'].indexOf(f.mode) < 0) f.mode = 'month';
     return f;
   }
   if (filterOrYear || month) {
@@ -914,7 +926,7 @@ function activityClientRow_(o) {
     mechanism:o.mechanism, beneficiaries:o.beneficiaries,
     has_partnership:o.has_partnership, partners:o.partners,
     notes:o.notes, photo_ids:o.photo_ids ? String(o.photo_ids).split(',').filter(Boolean) : [],
-    photo_folder_id:o.photo_folder_id
+    photo_folder_id:o.photo_folder_id, status:o.status || ''
   };
 }
 
