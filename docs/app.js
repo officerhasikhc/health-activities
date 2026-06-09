@@ -613,13 +613,12 @@ function submitForm(){
     Outbox.add(payload).then(function(localId){
       clearDraft(); updatePending();
       rememberSavedPeriod(payload);
-      onSavedLocal('حُفظت على الجهاز، وجارٍ رفعها في الخلفية.');
+      onSavedLocal({ silent:true });
       run('saveActivity', payload, USER.no).then(function(r){
         if(r && r.ok){
           Outbox.remove(localId).then(function(){
             if(Outbox.setActive) Outbox.setActive(payload,false);
             invalidateCaches(); updatePending();
-            toast(okMsg, 'ok');
             if(document.getElementById('recList')) loadRecords(true);
           });
         }
@@ -700,9 +699,13 @@ function directSave(payload,btn,okMsg){
 }
 function rememberSavedPeriod(payload){ PENDING_RECORD_FILTER=filterFromDate(payload && payload.event_date); }
 function onSaved(msg){ SUBMITTING=false; if(FORM) FORM._new_unsaved=false; rememberSavedPeriod(FORM); invalidateCaches(); updatePending(); toast(msg,'ok'); show('records'); }
-function onSavedLocal(msg){ invalidateCaches(); updatePending();
+function onSavedLocal(options){ invalidateCaches(); updatePending();
   SUBMITTING=false;
-  toast(msg||'حُفظت محليًا وستُرفع تلقائيًا عند توفّر الاتصال.','ok'); show('records'); }
+  show('records');
+  if(typeof options==='string') options={ message:options };
+  if(options && options.silent) return;
+  toast((options && options.message)||'تم الحفظ، وجارٍ الرفع.','ok');
+}
 
 function resetForm(){
   confirmModal('تفريغ النموذج','سيُمسح ما أدخلته في هذا النموذج. متابعة؟',function(){
@@ -798,7 +801,7 @@ function paintRecords(list){
         '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
         '<div class="row2">'+
           '<span class="badge">'+esc(typeLabel)+'</span>'+
-          (isPending?'<span class="badge pending-badge">'+(o._pending?'بانتظار الرفع':'جارٍ رفع الصور')+'</span>':'')+
+          (isPending?'<span class="badge pending-badge">جارٍ الرفع</span>':'')+
           ((o.has_partnership===true||o.has_partnership==='true')?'<span class="badge part">شراكة</span>':'')+
         '</div>'+
         '<div class="rec-facts">'+
@@ -837,7 +840,7 @@ function viewActivity(id){
     dl('المكان', o.location)+ dl('آلية التنفيذ', o.mechanism)+
     dl('عدد المستفيدين', o.beneficiaries)+ dl('المنفّذة', o.executor_name)+
     ((o.has_partnership===true||o.has_partnership==='true')?dl('الجهات المشاركة', o.partners):'')+
-    (o._pending?dl('الحالة','محفوظ محليًا - بانتظار الرفع'):(o.status==='جارٍ رفع الصور'?dl('الحالة','جارٍ رفع الصور'):''))+
+    (o._pending?dl('الحالة','تم الحفظ - جارٍ الرفع'):(o.status==='جارٍ رفع الصور'?dl('الحالة','جارٍ رفع الصور'):''))+
     (o.notes?dl('ملاحظات', o.notes):'')+
     (photos?'<div style="margin-top:14px"><label>الصور</label><div class="photo-grid">'+photos+'</div></div>':'');
   openModal(o.title, body,

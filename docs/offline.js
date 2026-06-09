@@ -116,7 +116,6 @@ var Outbox = (function () {
 
 // إعادة المحاولة تلقائيًا عند عودة الاتصال
 window.addEventListener('online', function () {
-  toast('عاد الاتصال — جارٍ رفع المحفوظ محليًا…');
   syncOutbox();
 });
 
@@ -149,7 +148,6 @@ function syncOutbox() {
     updatePending();
     if (r.sent > 0) {
       if (typeof invalidateCaches === 'function') invalidateCaches();
-      toast('تم رفع ' + r.sent + ' فعالية محفوظة محليًا.', 'ok');
       if (typeof loadRecords === 'function' && document.getElementById('recList')) loadRecords(true);
     }
   });
@@ -161,7 +159,11 @@ function updatePending() {
     var el = document.getElementById('pending');
     if (n > 0) registerBackgroundSync();
     if (!el) return;
-    if (n > 0) { el.textContent = 'بانتظار الرفع: ' + n; el.classList.remove('hidden'); }
-    else el.classList.add('hidden');
+    if (n > 0) {
+      el.textContent = n === 1 ? 'جارٍ الرفع' : ('جارٍ الرفع: ' + n);
+      el.classList.add('uploading');
+      el.classList.remove('hidden');
+    }
+    else { el.classList.add('hidden'); el.classList.remove('uploading'); }
   });
 }
