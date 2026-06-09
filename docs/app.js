@@ -894,7 +894,7 @@ function paintRecords(list){
       ? '<div class="rec-thumb" onclick="viewActivity(\''+o.id+'\')"><img loading="lazy" src="https://drive.google.com/thumbnail?id='+firstId+'&sz=w300">'+
         (photoCount>1?'<span class="rec-thumb-count">'+photoCount+'</span>':'')+'</div>'
       : '<div class="rec-thumb rec-thumb-empty" onclick="viewActivity(\''+o.id+'\')"><span>لا صور</span></div>';
-    return '<div class="rec">'+
+    return '<div class="rec" id="rec_'+escAttr(o.id)+'">'+
       thumb+
       '<div class="meta">'+
         '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
@@ -914,7 +914,7 @@ function paintRecords(list){
         '<button class="btn btn-view btn-sm" onclick="viewActivity(\''+o.id+'\')"><span class="ico">◉</span> عرض</button>'+
         (isPending?'':'<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>')+
         (isPending?'':'<button class="btn btn-print btn-sm" id="pdfBtn_'+escAttr(o.id)+'" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⤓</span> تحميل PDF</button>')+
-        (isPending?'':'<button class="btn btn-danger-outline btn-sm" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>')+
+        (isPending?'':'<button class="btn btn-danger-outline btn-sm" id="delBtn_'+escAttr(o.id)+'" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>')+
       '</div></div>';
   }).join('');
 }
@@ -994,9 +994,32 @@ function editActivity(id){
 function askDelete(id){
   var o=window._recs[id];
   confirmModal('حذف الفعالية','سيُحذف سجل «'+esc(o.title)+'» نهائيًا. هل أنت متأكد؟',function(){
+    var btn = document.getElementById('delBtn_'+id);
+    if(btn) setBusy(btn, 'جارٍ الحذف…');
     run('deleteActivity',id,USER.no).then(function(r){
-      if(r.ok){ invalidateCaches(); toast('تم الحذف.','ok'); loadRecords(true); }
-      else toast('تعذّر الحذف.','err');
+      if(r.ok){ 
+        invalidateCaches(); 
+        toast('تم الحذف.','ok'); 
+        var card = document.getElementById('rec_'+id);
+        if(card){
+          card.style.transition = 'all 0.3s ease';
+          card.style.opacity = '0';
+          card.style.transform = 'scale(0.95)';
+          setTimeout(function(){ 
+            card.remove(); 
+            if(document.querySelectorAll('.rec').length===0){
+              var box=document.getElementById('recList');
+              if(box) box.innerHTML='<div class="empty">لا توجد فعاليات مسجّلة.</div>';
+            }
+          }, 300);
+        } else {
+          loadRecords(true);
+        }
+      }
+      else {
+        if(btn) restoreBusy(btn);
+        toast('تعذّر الحذف.','err');
+      }
     });
   }, true);
 }
