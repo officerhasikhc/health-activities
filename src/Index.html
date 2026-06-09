@@ -3,6 +3,7 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <?!= include('Stylesheet'); ?>
 </head>
 <body>
@@ -19,11 +20,22 @@
         المديرية العامة للخدمات الصحية بمحافظة ظفار<br>
         التجمّع الصحي (٢) — مركز صحي حاسك
       </div>
-      <label style="display:block;text-align:right;margin-bottom:6px">الرقم الوظيفي</label>
-      <input id="empNo" type="text" inputmode="numeric" placeholder="••••••" autocomplete="off">
+      
+      <div class="login-instructions">
+        أهلاً بك، يرجى إدخال رقمك الوظيفي للمتابعة
+      </div>
+
+      <div class="input-group">
+        <label for="empNo">الرقم الوظيفي</label>
+        <input id="empNo" type="text" inputmode="numeric" placeholder="مثال: 12345" autocomplete="off">
+      </div>
+      
       <label class="remember-row"><input type="checkbox" id="rememberEmp"> <span>تذكّر الرقم على هذا الجهاز</span></label>
-      <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">دخول</button>
-      <button class="btn btn-ghost install-btn" onclick="installApp()">تثبيت التطبيق</button>
+      
+      <div class="login-actions">
+        <button class="btn btn-primary btn-large" id="loginBtn" onclick="doLogin()">دخول المنصة</button>
+        <button class="btn btn-ghost btn-large install-btn" onclick="installApp()">تثبيت التطبيق</button>
+      </div>
       <div class="login-err" id="loginErr"></div>
     </div>
   </div>
