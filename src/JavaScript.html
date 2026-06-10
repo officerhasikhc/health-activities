@@ -210,7 +210,7 @@ function renderTabs(){
   document.getElementById('tabsBar').innerHTML=tabs.map(function(t){
     var warm=(t.id==='records'||t.id==='dashboard')?' onpointerenter="Warmup.intent(\''+t.id+'\')" ontouchstart="Warmup.intent(\''+t.id+'\')"':'';
     var badgeHtml = t.id==='records' ? '<span id="tabBadge_records" class="nav-badge hidden">جديد</span>' : '';
-    return '<button class="tab" data-tab="'+t.id+'" onclick="show(\''+t.id+'\')"'+warm+'>'+t.label+' '+badgeHtml+'</button>';
+    return '<button class="tab" data-tab="'+t.id+'" onclick="onTabClick(\''+t.id+'\')"'+warm+'>'+t.label+' '+badgeHtml+'</button>';
   }).join('');
 }
 function setActiveTab(id){
@@ -218,12 +218,15 @@ function setActiveTab(id){
     el.classList.toggle('active', el.getAttribute('data-tab')===id);
   });
 }
-function show(tab){
-  setActiveTab(tab);
-  if(tab==='records') {
+function onTabClick(tab) {
+  if (tab === 'records') {
     localStorage.setItem('new_activity_count', 0);
     updateBellAndBadges();
   }
+  show(tab);
+}
+function show(tab){
+  setActiveTab(tab);
   if(tab==='register') renderForm();
   else if(tab==='records') renderRecords();
   else if(tab==='dashboard') renderDashboard();
@@ -865,9 +868,9 @@ function resetForm(){
 /* ====================== السجل ====================== */
 function renderRecords(){
   document.getElementById('view').innerHTML=
-  '<div class="card">'+
-    '<h2>سجل الفعاليات</h2>'+
-    '<p class="sub">'+(USER.role==='admin'?'جميع الفعاليات المسجّلة.':'فعالياتك المسجّلة.')+'</p>'+
+    '<div class="card">'+
+    '<h2>سجل البرامج الصحية</h2>'+
+    '<p class="sub">'+(USER.role==='admin'?'جميع البرامج المسجلة.':'برامجك المسجلة.')+'</p>'+
     periodControlsHtml('fl')+
     '<div class="filters action-filters">'+
       '<div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadRecords(true)">تحديث</button></div>'+
@@ -1340,7 +1343,7 @@ function renderAdmin(){
     requiredFieldsBlock()+
   '</div>'+
   '<div class="card"><h2>التصدير</h2>'+
-    '<p class="sub">تصدير PDF متاح من زر PDF داخل سجل الفعاليات، وتصدير Excel متاح من السجل حسب الفترة المختارة.</p>'+
+    '<p class="sub">تصدير PDF متاح من زر PDF داخل سجل البرامج الصحية، وتصدير Excel متاح من السجل حسب الفترة المختارة.</p>'+
     '<button class="btn btn-excel" onclick="show(\'records\')">الانتقال للسجل</button>'+
   '</div>';
 }
