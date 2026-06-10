@@ -1215,8 +1215,8 @@ function verticalBars(obj, dimension) {
   var max=Math.max.apply(null,keys.map(function(k){return obj[k];}));
   return '<div class="vertical-chart">'+keys.map(function(k){
     var pct=max?Math.round(obj[k]/max*100):0;
-    return '<button class="v-bar-col bar-click" onclick="showDashItems(\''+dimension+'\',decodeURIComponent(\''+encodeURIComponent(k)+'\'))">'+
-      '<span class="v-val">'+obj[k]+'</span>'+
+    return '<button class="v-bar-col bar-click" title="'+obj[k]+' فعالية في '+esc(k)+'" onclick="showDashItems(\''+dimension+'\',decodeURIComponent(\''+encodeURIComponent(k)+'\'))">'+
+      '<span class="v-val" style="display:flex;flex-direction:column;align-items:center;"><span>'+obj[k]+'</span><span style="font-size:9px;font-weight:normal;opacity:0.8">فعالية</span></span>'+
       '<span class="v-track"><span class="v-fill" style="height:'+pct+'%"></span></span>'+
       '<span class="v-lbl">'+esc(k)+'</span>'+
     '</button>';

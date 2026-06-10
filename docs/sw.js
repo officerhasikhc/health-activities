@@ -1,4 +1,4 @@
-var CACHE_NAME = 'athar-shell-v12';
+var CACHE_NAME = 'athar-shell-v13';
 var SHELL = [
   './',
   './index.html',
