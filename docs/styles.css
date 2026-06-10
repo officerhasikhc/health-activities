@@ -35,26 +35,32 @@
   .app-title span{font-size:20px;font-weight:700;letter-spacing:0}
   .app-title strong{font-size:12px;font-weight:500;color:#c9dcdf;letter-spacing:0}
   .topbar-spacer{flex:1}
-  .who{font-size:12.5px;text-align:left;color:#dfe9ea;display:flex;align-items:center;gap:10px}
-  .who b{display:block;font-size:13px;color:#fff;line-height:1.2}
-  .bell-icon{position:relative;cursor:pointer;font-size:18px;margin-left:4px;transition:transform 0.2s}
-  .bell-icon:hover{transform:scale(1.1)}
-  .bell-badge{position:absolute;top:-4px;right:-6px;background:var(--err);color:#fff;font-size:10px;font-weight:bold;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center;line-height:1.2}
+  .who{font-size:12px;text-align:left;color:#dfe9ea;display:flex;align-items:center;gap:8px}
+  .who b{display:block;font-size:12.5px;color:#fff;line-height:1.2}
+  .bell-btn{position:relative;cursor:pointer;background:none;border:1px solid rgba(255,255,255,.25);
+    border-radius:4px;padding:4px 5px;color:rgba(255,255,255,.8);display:flex;align-items:center;
+    justify-content:center;transition:all .15s ease;line-height:0}
+  .bell-btn:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.4);color:#fff}
+  .bell-badge{position:absolute;top:-5px;right:-5px;background:var(--err);color:#fff;
+    font-size:9px;font-weight:700;min-width:14px;height:14px;line-height:14px;
+    padding:0 3px;border-radius:7px;text-align:center}
   .nav-badge{background:var(--err);color:#fff;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:10px;margin-right:6px;animation:pulseRed 1.5s infinite;display:inline-block;vertical-align:middle}
   @keyframes pulseRed{0%{box-shadow:0 0 0 0 rgba(178,59,59,0.7)}70%{box-shadow:0 0 0 6px rgba(178,59,59,0)}100%{box-shadow:0 0 0 0 rgba(178,59,59,0)}}
-  .btn-logout{background:transparent;border:1px solid rgba(255,255,255,.4);
-    color:#eef3f4;border-radius:5px;padding:5px 12px;cursor:pointer;font-size:12.5px;
-    margin-inline-start:4px;white-space:nowrap}
-  .btn-logout:hover{background:rgba(255,255,255,.12)}
+  .btn-logout{background:transparent;border:1px solid rgba(255,255,255,.25);
+    color:rgba(255,255,255,.8);border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px;
+    font-family:inherit;white-space:nowrap;transition:all .15s ease}
+  .btn-logout:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.4);color:#fff}
+  .topbar-sub{max-width:1080px;margin:0 auto;padding:0 18px 6px;
+    font-size:11px;color:rgba(207,224,227,.6);text-align:left}
   .pending{background:rgba(154,123,63,.18);border:1px solid rgba(154,123,63,.35);
-    color:#f3e6c8;border-radius:4px;padding:2px 8px;font-size:10.5px;margin-left:4px;
-    display:inline-flex;align-items:center;gap:4px;line-height:1.3;
-    transition:all .3s ease;max-width:220px;overflow:hidden}
+    color:#f3e6c8;border-radius:4px;padding:3px 8px;font-size:11px;margin-left:4px;
+    display:inline-flex;align-items:center;gap:5px;line-height:1.35;
+    transition:all .3s ease;max-width:240px;overflow:hidden}
   .pending-dot{width:5px;height:5px;border-radius:50%;background:#f3e6c8;
     flex:0 0 auto;animation:pulse 1.2s ease-in-out infinite}
-  .pending-info{display:flex;flex-direction:column;gap:0;min-width:0}
-  .pending-main{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px}
-  .pending-detail{font-size:9px;opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pending-info{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .pending-main{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;font-weight:500}
+  .pending-detail{font-size:9.5px;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
 
   /* ===== لافتة خافتة (cover) ===== */

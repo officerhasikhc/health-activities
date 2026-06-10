@@ -76,13 +76,16 @@
         <div class="topbar-spacer"></div>
         <span id="pending" class="pending hidden"><span class="pending-dot"></span><span class="pending-info"><span class="pending-main" id="pendingMain"></span><span class="pending-detail" id="pendingDetail"></span></span></span>
         <div class="who">
-          <div id="bellIcon" class="bell-icon hidden" onclick="onBellClick()">
-            🔔<span id="bellBadge" class="bell-badge">0</span>
-          </div>
+          <button id="bellIcon" class="bell-btn hidden" onclick="onBellClick()" title="الإشعارات">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span id="bellBadge" class="bell-badge hidden">0</span>
+          </button>
           <b id="whoName"></b>
-          <span id="whoTitle"></span>
+          <button class="btn-logout" onclick="logout()">خروج</button>
         </div>
-        <button class="btn-logout" onclick="logout()">خروج</button>
+      </div>
+      <div class="topbar-sub">
+        <span id="whoTitle"></span>
       </div>
     </header>
 
