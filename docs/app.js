@@ -971,6 +971,7 @@ function paintRecords(list){
       thumb+
       '<div class="meta">'+
         '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
+        (isPending&&photoCount?'<div class="hint" style="margin:-4px 0 4px;font-size:11px;color:var(--accent)">جارٍ رفع '+photoCount+' صورة</div>':'')+
         '<div class="row2">'+
           '<span class="badge">'+esc(typeLabel)+'</span>'+
           (isPending?'<span class="badge pending-badge">جارٍ الرفع</span>':'')+

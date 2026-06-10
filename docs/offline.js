@@ -164,18 +164,24 @@ function updatePending() {
     if (!el) return;
     if (n > 0) {
       el.classList.remove('hidden');
-      // عرض العدد
-      if (mainEl) mainEl.textContent = n === 1 ? 'جارٍ الرفع' : ('جارٍ الرفع: ' + n);
-      // عرض تفاصيل الفعالية الحالية وعدد صورها
+      // حساب إجمالي الصور لكل الفعاليات المعلّقة
+      var totalPhotos = 0;
+      items.forEach(function(it) {
+        var p = it.payload || {};
+        totalPhotos += (p._upload_photos || 0) || (p.photos ? p.photos.length : 0);
+      });
+      // السطر الأول: عدد الفعاليات + الصور
+      if (mainEl) {
+        var main = n === 1 ? 'رفع فعالية' : ('رفع ' + n + ' فعاليات');
+        if (totalPhotos > 0) main += ' · ' + totalPhotos + ' صورة';
+        mainEl.textContent = main;
+      }
+      // السطر الثاني: اسم الفعالية الحالية
       if (detailEl) {
         var current = items[0] && items[0].payload;
         if (current) {
           var title = current._upload_title || current.title || '';
-          var photos = current._upload_photos || (current.photos ? current.photos.length : 0);
-          var detail = '';
-          if (title) detail = title.substring(0, 20);
-          if (photos > 0) detail += (detail ? ' · ' : '') + photos + ' صور';
-          detailEl.textContent = detail;
+          detailEl.textContent = title ? title.substring(0, 28) : '';
         } else {
           detailEl.textContent = '';
         }
