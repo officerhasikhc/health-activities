@@ -1150,7 +1150,7 @@ function renderDashboard(){
       '<div class="filters action-filters"><div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadDashboard(true)">تحديث</button></div></div>'+
       '<div id="dashBody"><div class="loading"><span class="spin"></span> جارٍ حساب المؤشرات…</div></div>'+
     '</div>';
-  initPeriodControls('dash');
+  initPeriodControls('dash', { mode: 'all' });
   loadDashboard();
 }
 function loadDashboard(force){
@@ -1183,18 +1183,44 @@ function paintDash(d){
       kpi(d.total,'إجمالي الفعاليات')+ kpi(d.beneficiaries,'إجمالي المستفيدين')+
       kpi(d.partnerships,'فعاليات بشراكات')+ kpi(Object.keys(d.byType).length,'أنواع مختلفة')+
     '</div>'+
-    dashBlock('التوزيع حسب النوع', d.byType, 'type')+
-    dashBlock('التوزيع حسب آلية التنفيذ', d.byMechanism, 'mechanism')+
-    dashBlock('التوزيع حسب الشهر', d.byMonth, 'month')+
-    dashBlock('التوزيع حسب نصف السنة', d.byHalf, 'half')+
-    dashBlock('التوزيع حسب الربع', d.byQuarter, 'quarter', 'الربع الأول: يناير-مارس، الثاني: أبريل-يونيو، الثالث: يوليو-سبتمبر، الرابع: أكتوبر-ديسمبر. شهر يونيو يقع في الربع الثاني والنصف الأول.')+
-    (USER.role==='admin'?dashBlock('حسب المنفّذة', d.byExecutor, 'executor'):'')+
+    dashBlock('التوزيع حسب النوع', d.byType, 'type', '', 'grid')+
+    dashBlock('التوزيع حسب آلية التنفيذ', d.byMechanism, 'mechanism', '', 'grid')+
+    dashBlock('التوزيع حسب الشهر', d.byMonth, 'month', '', 'vertical')+
+    dashBlock('التوزيع حسب نصف السنة', d.byHalf, 'half', '', 'bars')+
+    dashBlock('التوزيع حسب الربع', d.byQuarter, 'quarter', 'الربع الأول: يناير-مارس، الثاني: أبريل-يونيو، الثالث: يوليو-سبتمبر، الرابع: أكتوبر-ديسمبر. شهر يونيو يقع في الربع الثاني والنصف الأول.', 'bars')+
+    (USER.role==='admin'?dashBlock('حسب المنفّذة', d.byExecutor, 'executor', '', 'bars'):'')+
     '<div id="dashDetails"></div>';
 }
 function kpi(n,l){ return '<div class="kpi"><div class="n">'+(n||0)+'</div><div class="l">'+l+'</div></div>'; }
-function dashBlock(title,obj,dimension,hint){
+function dashBlock(title,obj,dimension,hint, type){
   return '<div class="section-divider"></div><div class="dash-head"><label>'+title+'</label>'+
-    (hint?'<span class="hint">'+hint+'</span>':'')+'</div>'+ bars(obj,dimension);
+    (hint?'<span class="hint">'+hint+'</span>':'')+'</div>'+ 
+    (type==='grid' ? gridBars(obj,dimension) : type==='vertical' ? verticalBars(obj,dimension) : bars(obj,dimension));
+}
+function gridBars(obj, dimension) {
+  var keys=Object.keys(obj||{}); if(!keys.length) return '<div class="empty">لا بيانات.</div>';
+  var max=Math.max.apply(null,keys.map(function(k){return obj[k];}));
+  var colors = ['#2188ff', '#3fb950', '#a371f7', '#ff7b72', '#f2cc60', '#ffbdf0', '#d2a8ff'];
+  return '<div class="grid-cards">'+keys.map(function(k, i){
+    var pct=max?Math.round(obj[k]/max*100):0;
+    var c = colors[i % colors.length];
+    return '<button class="grid-card bar-click" onclick="showDashItems(\''+dimension+'\',decodeURIComponent(\''+encodeURIComponent(k)+'\'))">'+
+      '<div class="gc-head"><span class="gc-lbl">'+esc(k)+'</span><span class="gc-v" style="color:'+c+'">'+obj[k]+'</span></div>'+
+      '<div class="gc-track"><div class="gc-fill" style="width:'+pct+'%; background:'+c+'"></div></div>'+
+    '</button>';
+  }).join('')+'</div>';
+}
+function verticalBars(obj, dimension) {
+  var keys=Object.keys(obj||{}); if(!keys.length) return '<div class="empty">لا بيانات.</div>';
+  var max=Math.max.apply(null,keys.map(function(k){return obj[k];}));
+  return '<div class="vertical-chart">'+keys.map(function(k){
+    var pct=max?Math.round(obj[k]/max*100):0;
+    return '<button class="v-bar-col bar-click" onclick="showDashItems(\''+dimension+'\',decodeURIComponent(\''+encodeURIComponent(k)+'\'))">'+
+      '<span class="v-val">'+obj[k]+'</span>'+
+      '<span class="v-track"><span class="v-fill" style="height:'+pct+'%"></span></span>'+
+      '<span class="v-lbl">'+esc(k)+'</span>'+
+    '</button>';
+  }).join('')+'</div>';
 }
 function bars(obj,dimension){
   var keys=Object.keys(obj||{}); if(!keys.length) return '<div class="empty">لا بيانات.</div>';
