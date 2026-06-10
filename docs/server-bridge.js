@@ -94,7 +94,7 @@
         if (!pending[id]) return;
         delete pending[id];
         reject(new Error('انتهت مهلة الاتصال بالخادم. تحقق من الاتصال ثم أعد المحاولة.'));
-      }, 90000);
+      }, 300000);
     });
   }
 
@@ -120,7 +120,7 @@
   function fetchCall(fn, args){
     if (!execUrl) return Promise.reject(new Error('لا يوجد رابط /exec'));
     var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    var timer = setTimeout(function(){ if (controller) controller.abort(); }, 90000);
+    var timer = setTimeout(function(){ if (controller) controller.abort(); }, 300000);
     log('fetch ->', fn);
     return fetch(execUrl, {
       method: 'POST',
