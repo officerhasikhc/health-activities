@@ -1185,7 +1185,7 @@ function paintDash(d){
     '</div>'+
     dashBlock('التوزيع حسب النوع', d.byType, 'type', '', 'grid')+
     dashBlock('التوزيع حسب آلية التنفيذ', d.byMechanism, 'mechanism', '', 'grid')+
-    dashBlock('التوزيع حسب الشهر', d.byMonth, 'month', '', 'vertical')+
+    dashBlock('التوزيع حسب الشهر', d.byMonth, 'month', '', 'bars')+
     dashBlock('التوزيع حسب نصف السنة', d.byHalf, 'half', '', 'bars')+
     dashBlock('التوزيع حسب الربع', d.byQuarter, 'quarter', 'الربع الأول: يناير-مارس، الثاني: أبريل-يونيو، الثالث: يوليو-سبتمبر، الرابع: أكتوبر-ديسمبر. شهر يونيو يقع في الربع الثاني والنصف الأول.', 'bars')+
     (USER.role==='admin'?dashBlock('حسب المنفّذة', d.byExecutor, 'executor', '', 'bars'):'')+
