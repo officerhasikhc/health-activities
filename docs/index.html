@@ -21,11 +21,15 @@
   <title>منصة أثر للمبادرات الصحية</title>
   <link rel="preconnect" href="https://script.google.com">
   <link rel="preconnect" href="https://script.googleusercontent.com">
+  <link rel="preconnect" href="https://drive.google.com">
+  <link rel="preconnect" href="https://lh3.googleusercontent.com">
+  <link rel="dns-prefetch" href="https://drive.google.com">
+  <link rel="dns-prefetch" href="https://lh3.googleusercontent.com">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/logo-login.png">
   <link rel="apple-touch-icon" href="assets/logo-login.png">
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260610-1">
+  <link rel="stylesheet" href="styles.css?v=20260610-2">
 </head>
 <body>
 
@@ -70,7 +74,7 @@
         </div>
         <div class="app-title"><span>منصة أثر</span><strong>للمبادرات الصحية</strong></div>
         <div class="topbar-spacer"></div>
-        <span id="pending" class="pending hidden"></span>
+        <span id="pending" class="pending hidden"><span class="pending-dot"></span><span class="pending-info"><span class="pending-main" id="pendingMain"></span><span class="pending-detail" id="pendingDetail"></span></span></span>
         <div class="who">
           <div id="bellIcon" class="bell-icon hidden" onclick="onBellClick()">
             🔔<span id="bellBadge" class="bell-badge">0</span>
@@ -88,7 +92,7 @@
   </div>
 
   <div id="modalHost"></div>
-  <div id="toast"></div>
+  <div id="toast"><span class="toast-bar"></span><span class="toast-icon"></span><span class="toast-msg"></span></div>
 
   <script>
     window.ATHAR_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycbxUg1TtF9Nmr7G_r6m0QznyPAvc2XXNTjJisNOFUTPhFZ2wbyDxrk-s5gx4e7L3w9N9wQ/exec?bridge=1';
@@ -99,9 +103,9 @@
     }
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="debug.js?v=20260609-9"></script>
-  <script src="server-bridge.js?v=20260609-8"></script>
-  <script src="offline.js?v=20260609-9"></script>
-  <script src="app.js?v=20260610-1"></script>
+  <script src="debug.js?v=20260610-2"></script>
+  <script src="server-bridge.js?v=20260610-2"></script>
+  <script src="offline.js?v=20260610-2"></script>
+  <script src="app.js?v=20260610-2"></script>
 </body>
 </html>

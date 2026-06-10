@@ -38,9 +38,16 @@ function run(fn){
 var toastT;
 function toast(msg, type){
   var t=document.getElementById('toast');
-  t.textContent=msg; t.className='show '+(type||'');
+  var icons={ok:'✓', err:'✕'};
+  var icon=icons[type]||'ℹ';
+  var bar=t.querySelector('.toast-bar');
+  var ic=t.querySelector('.toast-icon');
+  var m=t.querySelector('.toast-msg');
+  if(ic) ic.textContent=icon;
+  if(m) m.textContent=msg;
+  t.className='show '+(type||'');
   clearTimeout(toastT);
-  toastT=setTimeout(function(){ t.className=''; },2800);
+  toastT=setTimeout(function(){ t.className=''; },3200);
 }
 
 /* ====================== الدخول (استدعاء واحد) ====================== */
@@ -443,12 +450,17 @@ function warmRecordFilters(seed){
     list.push({mode:'year',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
   }
   list.forEach(function(x){ fetchRecordsForFilter(x, false).catch(function(){}); });
+  // تسخين كامل السنة دائماً
+  var yearFilter={mode:'year',year:f.year,month:f.month,quarter:f.quarter,half:f.half};
+  fetchRecordsForFilter(yearFilter, false).catch(function(){});
 }
 function warmDashboardFilters(seed){
   var f=clonePeriod(seed), list=[f];
   if(f.mode==='month') list.push({mode:'quarter',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
   if(f.mode==='quarter' || f.mode==='half') list.push({mode:'year',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
   list.forEach(function(x){ fetchDashboardForFilter(x, false).catch(function(){}); });
+  var yearFilter={mode:'year',year:f.year,month:f.month,quarter:f.quarter,half:f.half};
+  fetchDashboardForFilter(yearFilter, false).catch(function(){});
 }
 var Warmup = {
   afterLogin:function(){
@@ -750,9 +762,12 @@ function submitForm(){
   var isEdit=!!FORM.id && !FORM._new_unsaved;
   if(!FORM.id){ FORM.id=makeId('ACT'); FORM._new_unsaved=true; }
   FORM.client_request_id=FORM.client_request_id||makeId('REQ');
+  var photoCount=(FORM.photos||[]).length+(FORM.existing_photo_ids||[]).length;
   var payload=Object.assign({},FORM);
   payload._actor_no=USER.no;
   payload._was_edit=isEdit;
+  payload._upload_title=FORM.title||'';
+  payload._upload_photos=photoCount;
   var okMsg=isEdit?'تم حفظ التعديل بنجاح.':'تم حفظ الفعالية بنجاح.';
   var btn=document.getElementById('saveBtn');
   SUBMITTING=true;
@@ -949,7 +964,7 @@ function paintRecords(list){
       ? '<div class="rec-thumb" onclick="viewActivity(\''+o.id+'\')"><img loading="lazy" src="data:image/jpeg;base64,'+o.local_thumb+'">'+
         (photoCount>1?'<span class="rec-thumb-count">'+photoCount+'</span>':'')+'</div>'
       : firstId
-      ? '<div class="rec-thumb" onclick="viewActivity(\''+o.id+'\')"><img loading="lazy" src="https://drive.google.com/thumbnail?id='+firstId+'&sz=w300">'+
+      ? '<div class="rec-thumb" onclick="viewActivity(\''+o.id+'\')"><img loading="lazy" src="https://drive.google.com/thumbnail?id='+firstId+'&sz=w200">'+
         (photoCount>1?'<span class="rec-thumb-count">'+photoCount+'</span>':'')+'</div>'
       : '<div class="rec-thumb rec-thumb-empty" onclick="viewActivity(\''+o.id+'\')"><span>لا صور</span></div>';
     return '<div class="rec" id="rec_'+escAttr(o.id)+'">'+
@@ -986,7 +1001,7 @@ function viewActivity(id){
   var photos=localPhotos+(o.photo_ids||[]).map(function(pid){
     var i=(o.photo_ids||[]).indexOf(pid);
     return '<button class="photo-thumb photo-open" onclick="openPhotoViewer(window._recs[\''+id+'\'].photo_ids,'+i+',\''+escAttr(o.title)+'\')">'+
-      '<img loading="lazy" src="https://drive.google.com/thumbnail?id='+pid+'&sz=w300"></button>';
+      '<img loading="lazy" src="https://drive.google.com/thumbnail?id='+pid+'&sz=w200"></button>';
   }).join('');
   var typeLabel=o.display_type||o.type;
   var titleLabel=o.type==='يوم عالمي'?'اسم اليوم العالمي':'العنوان';
@@ -1161,13 +1176,15 @@ function exportZip(){
     var currentIdx = 0;
     var errorCount = 0;
     
-    var progressHtml = '<div style="text-align:center;padding:10px 0;">' +
-      '<h3 style="margin-top:0;color:#1a4d5c;">تجهيز ملفات الفعاليات</h3>' +
-      '<div style="background:#e1e8ed;border-radius:6px;height:14px;margin:20px 0;overflow:hidden;">' +
-        '<div id="zipProgressBar" style="background:linear-gradient(90deg, #1a4d5c, #2a7d9c);height:100%;width:0%;transition:width 0.3s ease;"></div>' +
+    var progressHtml = '<div style="text-align:center;padding:8px 0;">' +
+      '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;">' +
+        '<span class="spin" style="flex:0 0 auto"></span>' +
+        '<span id="zipProgressText" style="font-weight:600;font-size:14px;color:var(--brand-deep)">0 / ' + total + '</span>' +
       '</div>' +
-      '<div id="zipProgressText" style="font-weight:bold;margin-bottom:8px;font-size:16px;">0 / ' + total + '</div>' +
-      '<div id="zipCurrentFile" class="hint" style="font-size:13px;height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">جاري بدء التحميل...</div>' +
+      '<div style="background:#e8edf0;border-radius:4px;height:6px;margin:0 0 8px;overflow:hidden;">' +
+        '<div id="zipProgressBar" style="background:var(--brand);height:100%;width:0%;transition:width 0.3s ease;border-radius:4px;"></div>' +
+      '</div>' +
+      '<div id="zipCurrentFile" class="hint" style="font-size:12px;height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">جارٍ بدء التحميل…</div>' +
     '</div>';
     
     openModal('تصدير ZIP', progressHtml, '<button id="zipCancelBtn" class="btn btn-ghost" onclick="window._cancelZip=true; closeModal()">إلغاء</button>');
@@ -1181,8 +1198,8 @@ function exportZip(){
       if(currentIdx >= total){
         var pText = document.getElementById('zipProgressText');
         var cFile = document.getElementById('zipCurrentFile');
-        if(pText) pText.innerText = 'جاري ضغط الملفات...';
-        if(cFile) cFile.innerText = 'الرجاء الانتظار قليلاً';
+        if(pText) pText.innerText = 'جارٍ الضغط…';
+        if(cFile) cFile.innerText = '';
         var cancelBtn = document.getElementById('zipCancelBtn');
         if(cancelBtn) cancelBtn.style.display = 'none';
         
@@ -1191,9 +1208,9 @@ function exportZip(){
           closeModal();
           triggerBlobDownload(content, folderName + ".zip");
           if(errorCount > 0){
-            toast('تم التحميل، لكن فشل تحميل ' + errorCount + ' ملف/ملفات.','err');
+            toast('تم التحميل مع ' + errorCount + ' خطأ.','err');
           } else {
-            toast('تم تحميل جميع الفعاليات بنجاح.','ok');
+            toast('تم تحميل جميع الفعاليات.','ok');
           }
         }).catch(function(e){
           closeModal();
@@ -1202,30 +1219,45 @@ function exportZip(){
         return;
       }
       
-      var rec = cached[currentIdx];
-      var title = String(rec.title || 'بدون عنوان');
+      // تشغيل طلبين بالتوازي
+      var batch = [];
+      var batchSize = Math.min(2, total - currentIdx);
+      for(var b=0; b<batchSize; b++){
+        batch.push(currentIdx + b);
+      }
       
-      var progEl = document.getElementById('zipProgressBar');
-      var textEl = document.getElementById('zipProgressText');
-      var fileEl = document.getElementById('zipCurrentFile');
-      if(progEl) progEl.style.width = Math.round(((currentIdx+1) / total) * 100) + '%';
-      if(textEl) textEl.innerText = (currentIdx+1) + ' / ' + total;
-      if(fileEl) fileEl.innerText = 'تحميل: ' + title;
-      
-      run('exportActivityPdfDownload', rec.id, USER.no).then(function(r){
-        if(window._cancelZip) return;
-        if(r && r.ok && r.base64 && r.delivery === 'inline'){
-          folder.file((r.fileName || r.name || (title+'.pdf')), r.base64, {base64: true});
-        } else {
+      var batchDone = 0;
+      batch.forEach(function(idx){
+        var rec = cached[idx];
+        var title = String(rec.title || 'بدون عنوان');
+        
+        run('exportActivityPdfDownload', rec.id, USER.no).then(function(r){
+          if(window._cancelZip) return;
+          if(r && r.ok && r.base64 && r.delivery === 'inline'){
+            folder.file((r.fileName || r.name || (title+'.pdf')), r.base64, {base64: true});
+          } else {
+            errorCount++;
+          }
+          batchDone++;
+          if(batchDone >= batch.length){
+            currentIdx += batch.length;
+            var progEl = document.getElementById('zipProgressBar');
+            var textEl = document.getElementById('zipProgressText');
+            var fileEl = document.getElementById('zipCurrentFile');
+            if(progEl) progEl.style.width = Math.round((currentIdx / total) * 100) + '%';
+            if(textEl) textEl.innerText = currentIdx + ' / ' + total;
+            if(fileEl && cached[currentIdx]) fileEl.innerText = String(cached[currentIdx].title || '');
+            processNext();
+          }
+        }).catch(function(e){
+          if(window._cancelZip) return;
           errorCount++;
-        }
-        currentIdx++;
-        processNext();
-      }).catch(function(e){
-        if(window._cancelZip) return;
-        errorCount++;
-        currentIdx++;
-        processNext();
+          batchDone++;
+          if(batchDone >= batch.length){
+            currentIdx += batch.length;
+            processNext();
+          }
+        });
       });
     }
     

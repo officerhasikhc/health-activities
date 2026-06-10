@@ -155,15 +155,36 @@ function syncOutbox() {
 
 function updatePending() {
   if (!Outbox.available) return;
-  Outbox.count().then(function (n) {
+  Outbox.all().then(function (items) {
+    var n = items.length;
     var el = document.getElementById('pending');
+    var mainEl = document.getElementById('pendingMain');
+    var detailEl = document.getElementById('pendingDetail');
     if (n > 0) registerBackgroundSync();
     if (!el) return;
     if (n > 0) {
-      el.textContent = n === 1 ? 'جارٍ الرفع' : ('جارٍ الرفع: ' + n);
-      el.classList.add('uploading');
       el.classList.remove('hidden');
+      // عرض العدد
+      if (mainEl) mainEl.textContent = n === 1 ? 'جارٍ الرفع' : ('جارٍ الرفع: ' + n);
+      // عرض تفاصيل الفعالية الحالية وعدد صورها
+      if (detailEl) {
+        var current = items[0] && items[0].payload;
+        if (current) {
+          var title = current._upload_title || current.title || '';
+          var photos = current._upload_photos || (current.photos ? current.photos.length : 0);
+          var detail = '';
+          if (title) detail = title.substring(0, 20);
+          if (photos > 0) detail += (detail ? ' · ' : '') + photos + ' صور';
+          detailEl.textContent = detail;
+        } else {
+          detailEl.textContent = '';
+        }
+      }
     }
-    else { el.classList.add('hidden'); el.classList.remove('uploading'); }
+    else {
+      el.classList.add('hidden');
+      if (mainEl) mainEl.textContent = '';
+      if (detailEl) detailEl.textContent = '';
+    }
   });
 }
