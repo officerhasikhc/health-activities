@@ -1178,19 +1178,32 @@ function paintDash(d){
   d.byType = d.byType || {}; d.byMechanism = d.byMechanism || {};
   d.byMonth = d.byMonth || {}; d.byHalf = d.byHalf || {};
   d.byQuarter = d.byQuarter || {}; d.byExecutor = d.byExecutor || {};
+  var filter = typeof periodFilter==='function' ? periodFilter('dash') : {};
+  var mode = filter.mode || 'all';
   var host=document.getElementById('dashBody')||document.getElementById('view');
-  host.innerHTML=
+  var html =
     '<div class="kpis">'+
       kpi(d.total,'إجمالي الفعاليات')+ kpi(d.beneficiaries,'إجمالي المستفيدين')+
       kpi(d.partnerships,'فعاليات بشراكات')+ kpi(Object.keys(d.byType).length,'أنواع مختلفة')+
     '</div>'+
     dashBlock('التوزيع حسب النوع', d.byType, 'type', '', 'grid')+
-    dashBlock('التوزيع حسب آلية التنفيذ', d.byMechanism, 'mechanism', '', 'grid')+
-    dashBlock('التوزيع حسب الشهر', d.byMonth, 'month', '', 'bars')+
-    dashBlock('التوزيع حسب نصف السنة', d.byHalf, 'half', '', 'bars')+
-    dashBlock('التوزيع حسب الربع', d.byQuarter, 'quarter', 'الربع الأول: يناير-مارس، الثاني: أبريل-يونيو، الثالث: يوليو-سبتمبر، الرابع: أكتوبر-ديسمبر. شهر يونيو يقع في الربع الثاني والنصف الأول.', 'bars')+
-    (USER.role==='admin'?dashBlock('حسب المنفّذة', d.byExecutor, 'executor', '', 'bars'):'')+
-    '<div id="dashDetails"></div>';
+    dashBlock('التوزيع حسب آلية التنفيذ', d.byMechanism, 'mechanism', '', 'grid');
+    
+  if (mode === 'all' || mode === 'year' || mode === 'half' || mode === 'quarter') {
+    html += dashBlock('التوزيع حسب الشهر', d.byMonth, 'month', '', 'bars');
+  }
+  if (mode === 'all' || mode === 'year') {
+    html += dashBlock('التوزيع حسب نصف السنة', d.byHalf, 'half', '', 'bars');
+  }
+  if (mode === 'all' || mode === 'year' || mode === 'half') {
+    html += dashBlock('التوزيع حسب الربع', d.byQuarter, 'quarter', 'الربع الأول: يناير-مارس، الثاني: أبريل-يونيو، الثالث: يوليو-سبتمبر، الرابع: أكتوبر-ديسمبر. شهر يونيو يقع في الربع الثاني والنصف الأول.', 'bars');
+  }
+
+  if (USER.role === 'admin') {
+    html += dashBlock('حسب المنفّذة', d.byExecutor, 'executor', '', 'bars');
+  }
+  html += '<div id="dashDetails"></div>';
+  host.innerHTML = html;
 }
 function kpi(n,l){ return '<div class="kpi"><div class="n">'+(n||0)+'</div><div class="l">'+l+'</div></div>'; }
 function dashBlock(title,obj,dimension,hint, type){
