@@ -16,7 +16,8 @@ var CACHE = CacheService.getScriptCache();
 var SHEETS = {
   CONFIG: 'Config',
   USERS: 'Users',
-  ACTIVITIES: 'Activities'
+  ACTIVITIES: 'Activities',
+  AUDIT_LOG: 'AuditLog'
 };
 
 var AR_MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو',
@@ -39,8 +40,8 @@ var LOGIN_LOGO_NAME = 'logo-login.png';
 var OFFICIAL_APP_URL = 'https://officerhasikhc.github.io/health-activities/';
 var GITHUB_ORIGIN = 'https://officerhasikhc.github.io';
 var REQUIRED_FIELD_CATEGORY = 'required_field';
-var INLINE_DOWNLOAD_MAX_BYTES = 5 * 1024 * 1024;
-var ZIP_INLINE_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024;
+var INLINE_DOWNLOAD_MAX_BYTES = 40 * 1024 * 1024;
+var ZIP_INLINE_DOWNLOAD_MAX_BYTES = 40 * 1024 * 1024;
 var ZIP_INLINE_MAX_COUNT = 12;
 var ZIP_DRIVE_MAX_COUNT = 35;
 var REQUIRED_LOCKED_FIELDS = ['type','title','event_date','executor_no'];
@@ -770,7 +771,31 @@ function saveActivityLocked_(payload, actorEmpNo) {
     row.status = 'محفوظ';
     writeActivityRow_(sh, row, rowIndex);
   }
+  
+  logAudit_(actor, isNew ? 'إضافة' : 'تعديل', activityTitle_(row));
+  
   return { ok:true, id:id };
+}
+
+function logAudit_(actor, action, targetTitle) {
+  try {
+    var ss = ss_();
+    var sh = getOrCreateSheet_(ss, SHEETS.AUDIT_LOG, ['Timestamp', 'EmpNo', 'EmpName', 'Action', 'Target']);
+    var now = new Date();
+    sh.appendRow([now.toISOString(), actor.emp_no || '', actor.name || '', action, targetTitle]);
+    
+    if (Math.random() < 0.1) {
+      var data = sh.getRange(1, 1, sh.getLastRow(), 1).getValues();
+      var cutoff = new Date();
+      cutoff.setFullYear(cutoff.getFullYear() - 2);
+      var rowsToDelete = 0;
+      for (var i = 1; i < data.length; i++) {
+        if (new Date(data[i][0]) < cutoff) rowsToDelete++;
+        else break;
+      }
+      if (rowsToDelete > 0) sh.deleteRows(2, rowsToDelete);
+    }
+  } catch(e) {}
 }
 
 function writeActivityRow_(sh, row, rowIndex) {
@@ -842,7 +867,8 @@ function normalizePeriodFilter_(filterOrYear, month) {
       year: parseInt(filterOrYear.year, 10) || current.year,
       month: parseInt(filterOrYear.month, 10) || current.month,
       quarter: parseInt(filterOrYear.quarter, 10) || Math.floor((current.month - 1) / 3) + 1,
-      half: parseInt(filterOrYear.half, 10) || (current.month <= 6 ? 1 : 2)
+      half: parseInt(filterOrYear.half, 10) || (current.month <= 6 ? 1 : 2),
+      emp: filterOrYear.emp
     };
     if (['current_month','month','quarter','half','year','all'].indexOf(f.mode) < 0) f.mode = 'month';
     return f;
@@ -853,7 +879,8 @@ function normalizePeriodFilter_(filterOrYear, month) {
       year: parseInt(filterOrYear, 10) || current.year,
       month: parseInt(month, 10) || current.month,
       quarter: Math.floor(((parseInt(month, 10) || current.month) - 1) / 3) + 1,
-      half: (parseInt(month, 10) || current.month) <= 6 ? 1 : 2
+      half: (parseInt(month, 10) || current.month) <= 6 ? 1 : 2,
+      emp: null
     };
   }
   return current;
@@ -871,8 +898,17 @@ function activityYearMonth_(o) {
 
 function filterActivityRows_(rows, filter) {
   filter = normalizePeriodFilter_(filter);
-  if (filter.mode === 'all') return rows;
-  return (rows || []).filter(function(o){
+  
+  var resultRows = rows || [];
+  if (filter.emp && filter.emp !== 'all' && filter.emp !== '') {
+    resultRows = resultRows.filter(function(o) {
+      return String(o.executor_no) === String(filter.emp);
+    });
+  }
+  
+  if (filter.mode === 'all') return resultRows;
+  
+  return resultRows.filter(function(o){
     var ym = activityYearMonth_(o);
     if (!ym.year || !ym.month) return false;
     if (filter.mode === 'current_month' || filter.mode === 'month') {
@@ -946,7 +982,9 @@ function deleteActivity(id, actorEmpNo) {
   if (user.role !== 'admin' && String(row.executor_no) !== String(user.emp_no)) {
     return { ok:false, msg:'لا يمكنك حذف سجل مستخدم آخر.' };
   }
+  var targetTitle = activityTitle_(row);
   sh.deleteRow(rowIndex);
+  logAudit_(user, 'حذف', targetTitle);
   return { ok:true };
 }
 
@@ -981,6 +1019,22 @@ function getDashboard(empNo, filter) {
     if (o.has_partnership===true || o.has_partnership==='true') out.partnerships++;
     var ex = o.executor_name || ''; if(ex) out.byExecutor[ex] = (out.byExecutor[ex]||0)+1;
   });
+  
+  var auditLogs = [];
+  try {
+    var auditSh = ss_().getSheetByName(SHEETS.AUDIT_LOG);
+    if (auditSh && auditSh.getLastRow() > 1) {
+      var raw = auditSh.getDataRange().getValues();
+      for (var i = raw.length - 1; i > 0; i--) {
+        var r = raw[i];
+        if (user.role !== 'admin' && String(r[1]) !== String(user.emp_no)) continue;
+        auditLogs.push({ ts: r[0], empNo: r[1], empName: r[2], action: r[3], target: r[4] });
+        if (auditLogs.length >= 50) break;
+      }
+    }
+  } catch(e) {}
+  out.auditLogs = auditLogs;
+  
   return out;
 }
 

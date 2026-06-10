@@ -195,19 +195,21 @@ function boot(){
   show('register');
   syncOutbox();      // رفع أي محفوظ محليًا من جلسة سابقة
   updatePending();
+  updateBellAndBadges();
   Warmup.afterLogin();
 }
 
 function renderTabs(){
   var tabs=[
     {id:'register', label:'تسجيل فعالية'},
-    {id:'records',  label:'السجل'},
+    {id:'records',  label:'البرامج الصحية'},
     {id:'dashboard',label:'المؤشرات'}
   ];
   if(USER.role==='admin') tabs.push({id:'admin', label:'الإدارة'});
   document.getElementById('tabsBar').innerHTML=tabs.map(function(t){
     var warm=(t.id==='records'||t.id==='dashboard')?' onpointerenter="Warmup.intent(\''+t.id+'\')" ontouchstart="Warmup.intent(\''+t.id+'\')"':'';
-    return '<button class="tab" data-tab="'+t.id+'" onclick="show(\''+t.id+'\')"'+warm+'>'+t.label+'</button>';
+    var badgeHtml = t.id==='records' ? '<span id="tabBadge_records" class="nav-badge hidden">جديد</span>' : '';
+    return '<button class="tab" data-tab="'+t.id+'" onclick="show(\''+t.id+'\')"'+warm+'>'+t.label+' '+badgeHtml+'</button>';
   }).join('');
 }
 function setActiveTab(id){
@@ -217,10 +219,39 @@ function setActiveTab(id){
 }
 function show(tab){
   setActiveTab(tab);
+  if(tab==='records') {
+    localStorage.setItem('new_activity_count', 0);
+    updateBellAndBadges();
+  }
   if(tab==='register') renderForm();
   else if(tab==='records') renderRecords();
   else if(tab==='dashboard') renderDashboard();
   else if(tab==='admin') renderAdmin();
+}
+
+function updateBellAndBadges(addedCount) {
+  var c = parseInt(localStorage.getItem('new_activity_count') || '0', 10);
+  if (addedCount) {
+    c += addedCount;
+    localStorage.setItem('new_activity_count', c);
+  }
+  var b = document.getElementById('bellIcon');
+  var bdg = document.getElementById('bellBadge');
+  var tBdg = document.getElementById('tabBadge_records');
+  if (c > 0) {
+    if(b) b.classList.remove('hidden');
+    if(bdg) bdg.innerText = c;
+    if(tBdg) { tBdg.classList.remove('hidden'); tBdg.innerText = c; }
+  } else {
+    if(b) b.classList.add('hidden');
+    if(tBdg) tBdg.classList.add('hidden');
+  }
+}
+
+function onBellClick() {
+  localStorage.setItem('new_activity_count', 0);
+  updateBellAndBadges();
+  show('records');
 }
 
 /* ====================== الفترة والمعرّفات ====================== */
@@ -241,6 +272,14 @@ function yearOptions(sel){
 function periodControlsHtml(prefix){
   var p=currentPeriod();
   var monthsHtml = AR_MONTHS_UI.map(function(m,i){ return '<option value="m'+(i+1)+'">'+m+'</option>'; }).join('');
+  
+  var empHtml = '';
+  if(window.USER && USER.role === 'admin' && window.CONFIG && CONFIG.users) {
+    var opts = '<option value="">الجميع</option>';
+    CONFIG.users.forEach(function(u){ opts += '<option value="'+u.no+'">'+u.name+'</option>'; });
+    empHtml = '<div class="field"><label>الموظف</label><select id="'+prefix+'_emp" onchange="periodReload(\''+prefix+'\')">'+opts+'</select></div>';
+  }
+
   return '<div class="filters period-filters" style="display:flex;gap:15px;flex-wrap:wrap;">'+
     '<div class="field" id="'+prefix+'_yearWrap"><label>السنة</label><select id="'+prefix+'_year" onchange="periodReload(\''+prefix+'\')">'+yearOptions(p.year)+'</select></div>'+
     '<div class="field"><label>الفترة</label><select id="'+prefix+'_period" onchange="onPeriodChange(\''+prefix+'\')">'+
@@ -254,6 +293,7 @@ function periodControlsHtml(prefix){
       '<optgroup label="شهري">'+monthsHtml+'</optgroup>'+
       '<option value="all">كل السجلات (جميع السنوات)</option>'+
     '</select></div>'+
+    empHtml +
   '</div>';
 }
 function initPeriodControls(prefix, initial){
@@ -294,12 +334,15 @@ function periodFilter(prefix){
   else if(per.startsWith('q')) { mode='quarter'; q=parseInt(per.substring(1),10); }
   else if(per.startsWith('m')) { mode='month'; m=parseInt(per.substring(1),10); }
   
+  var emp = val(prefix+'_emp');
+  
   return {
     mode: mode,
     year: year,
     month: m,
     quarter: q,
-    half: h
+    half: h,
+    emp: emp
   };
 }
 function periodKey(prefix){ return JSON.stringify(periodFilter(prefix)); }
@@ -716,7 +759,7 @@ function submitForm(){
     Outbox.add(payload).then(function(localId){
       clearDraft(); updatePending();
       rememberSavedPeriod(payload);
-      onSavedLocal({ silent:true });
+      onSavedLocal({ silent:true }, isEdit);
       run('saveActivity', payload, USER.no).then(function(r){
         if(r && r.ok){
           Outbox.remove(localId).then(function(){
@@ -790,9 +833,10 @@ function showValidationErrors(miss){
   toast('حقول ناقصة: '+miss.map(function(m){ return m.label; }).join('، '),'err');
 }
 function directSave(payload,btn,okMsg){
-  var fallbackLabel=(payload && payload._was_edit)?'حفظ التعديلات':'حفظ الفعالية';
+  var wasEdit = (payload && payload._was_edit);
+  var fallbackLabel=wasEdit?'حفظ التعديلات':'حفظ الفعالية';
   run('saveActivity',payload,USER.no).then(function(r){
-    if(r&&r.ok){ clearDraft(); onSaved(okMsg||'تم الحفظ بنجاح.'); }
+    if(r&&r.ok){ clearDraft(); onSaved(okMsg||'تم الحفظ بنجاح.', wasEdit); }
     else { SUBMITTING=false; btn.disabled=false; btn.textContent=fallbackLabel; toast((r&&r.msg)||'تعذّر الحفظ.','err'); }
   }).catch(function(){
     SUBMITTING=false;
@@ -801,9 +845,10 @@ function directSave(payload,btn,okMsg){
   });
 }
 function rememberSavedPeriod(payload){ PENDING_RECORD_FILTER=filterFromDate(payload && payload.event_date); }
-function onSaved(msg){ SUBMITTING=false; if(FORM) FORM._new_unsaved=false; rememberSavedPeriod(FORM); invalidateCaches(); updatePending(); toast(msg,'ok'); show('records'); }
-function onSavedLocal(options){ invalidateCaches(); updatePending();
+function onSaved(msg, wasEdit){ SUBMITTING=false; if(FORM) FORM._new_unsaved=false; rememberSavedPeriod(FORM); invalidateCaches(); updatePending(); if(!wasEdit) updateBellAndBadges(1); toast(msg,'ok'); show('records'); }
+function onSavedLocal(options, wasEdit){ invalidateCaches(); updatePending();
   SUBMITTING=false;
+  if(!wasEdit) updateBellAndBadges(1);
   show('records');
   if(typeof options==='string') options={ message:options };
   if(options && options.silent) return;
@@ -1210,6 +1255,25 @@ function paintDash(d){
   if (USER.role === 'admin') {
     html += dashBlock('حسب المنفّذة', d.byExecutor, 'executor', '', 'bars');
   }
+  
+  if (d.auditLogs && d.auditLogs.length > 0) {
+    var logsHtml = d.auditLogs.map(function(lg) {
+      var dStr = new Date(lg.ts);
+      var formattedTs = isNaN(dStr) ? lg.ts : (dStr.getFullYear()+'/'+(dStr.getMonth()+1)+'/'+dStr.getDate()+' '+('0'+dStr.getHours()).slice(-2)+':'+('0'+dStr.getMinutes()).slice(-2));
+      var badgeCls = lg.action==='حذف' ? 'part' : (lg.action==='إضافة' ? 'pending-badge' : '');
+      return '<div class="mini-rec" style="grid-template-columns:auto 120px 70px 1fr;gap:12px;">'+
+        '<span class="hint" style="white-space:nowrap" dir="ltr">'+esc(formattedTs)+'</span>'+
+        '<b class="truncate" title="'+esc(lg.empName)+'">'+esc(lg.empName)+'</b>'+
+        '<span class="badge '+badgeCls+'" style="text-align:center">'+esc(lg.action)+'</span>'+
+        '<span class="truncate" title="'+esc(lg.target)+'">'+esc(lg.target)+'</span>'+
+      '</div>';
+    }).join('');
+    
+    html += '<div class="section-divider"></div>'+
+      '<div class="dash-head"><label>سجل أنشطة النظام (الحديثة)</label></div>'+
+      '<div class="mini-records" style="max-height:300px;overflow-y:auto;padding:5px 0;">'+logsHtml+'</div>';
+  }
+
   html += '<div id="dashDetails"></div>';
   host.innerHTML = html;
 }

@@ -36,8 +36,13 @@
   .app-title span{font-size:20px;font-weight:700;letter-spacing:0}
   .app-title strong{font-size:12px;font-weight:500;color:#c9dcdf;letter-spacing:0}
   .topbar-spacer{flex:1}
-  .who{font-size:12.5px;text-align:left;color:#dfe9ea}
-  .who b{display:block;font-size:13px;color:#fff}
+  .who{font-size:12.5px;text-align:left;color:#dfe9ea;display:flex;align-items:center;gap:10px}
+  .who b{display:block;font-size:13px;color:#fff;line-height:1.2}
+  .bell-icon{position:relative;cursor:pointer;font-size:18px;margin-left:4px;transition:transform 0.2s}
+  .bell-icon:hover{transform:scale(1.1)}
+  .bell-badge{position:absolute;top:-4px;right:-6px;background:var(--err);color:#fff;font-size:10px;font-weight:bold;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center;line-height:1.2}
+  .nav-badge{background:var(--err);color:#fff;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:10px;margin-right:6px;animation:pulseRed 1.5s infinite;display:inline-block;vertical-align:middle}
+  @keyframes pulseRed{0%{box-shadow:0 0 0 0 rgba(178,59,59,0.7)}70%{box-shadow:0 0 0 6px rgba(178,59,59,0)}100%{box-shadow:0 0 0 0 rgba(178,59,59,0)}}
   .btn-logout{background:transparent;border:1px solid rgba(255,255,255,.4);
     color:#eef3f4;border-radius:5px;padding:5px 12px;cursor:pointer;font-size:12.5px;
     margin-inline-start:4px;white-space:nowrap}
