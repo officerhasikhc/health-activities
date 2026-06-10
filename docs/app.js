@@ -241,12 +241,13 @@ function updateBellAndBadges(addedCount) {
   var b = document.getElementById('bellIcon');
   var bdg = document.getElementById('bellBadge');
   var tBdg = document.getElementById('tabBadge_records');
+  // الجرس يبقى ظاهراً دائماً — فقط الشارة تظهر/تختفي
+  if(b) b.classList.remove('hidden');
   if (c > 0) {
-    if(b) b.classList.remove('hidden');
-    if(bdg) bdg.innerText = c;
+    if(bdg) { bdg.classList.remove('hidden'); bdg.innerText = c; }
     if(tBdg) { tBdg.classList.remove('hidden'); tBdg.innerText = c; }
   } else {
-    if(b) b.classList.add('hidden');
+    if(bdg) bdg.classList.add('hidden');
     if(tBdg) tBdg.classList.add('hidden');
   }
 }
@@ -1121,10 +1122,10 @@ function exportExcel(){
 function exportZip(){
   var btn=document.getElementById('zipBtn');
   var filter=periodFilter('fl');
-  var cached=REC_CACHE[filterKey(filter)];
 
   if(typeof JSZip === 'undefined'){
-    var label=(cached&&cached.length?'تجهيز '+cached.length+' ملفات…':'جارٍ تجهيز الملفات…');
+    var quickCached=REC_CACHE[filterKey(filter)];
+    var label=(quickCached&&quickCached.length?'تجهيز '+quickCached.length+' ملفات…':'جارٍ تجهيز الملفات…');
     setBusy(btn, label);
     var options = { scope:'filter' };
     run('exportActivitiesZipDownload', filter, USER.no, options).then(function(r){
@@ -1138,92 +1139,101 @@ function exportZip(){
     return;
   }
 
-  if(!cached || !cached.length){
-    toast('لا توجد فعاليات مسجّلة في هذه الفترة لتصديرها.','err');
-    return;
-  }
+  // انتظر جلب البيانات أولاً إن لم تكن في الكاش
+  setBusy(btn, 'جارٍ تجهيز الملفات…');
+  fetchRecordsForFilter(filter, false).then(function(cached){
+    if(!cached || !cached.length){
+      restoreBusy(btn);
+      toast('لا توجد فعاليات مسجّلة في هذه الفترة لتصديرها.','err');
+      return;
+    }
+    restoreBusy(btn);
 
-  var total = cached.length;
-  var zip = new JSZip();
-  var folderName = 'فعاليات_أثر';
-  if(filter.mode === 'month') folderName += '_' + filter.year + '_شهر_' + filter.month;
-  else if(filter.mode === 'quarter') folderName += '_' + filter.year + '_ربع_' + filter.quarter;
-  else if(filter.mode === 'half') folderName += '_' + filter.year + '_نصف_' + filter.half;
-  else if(filter.mode === 'year') folderName += '_' + filter.year;
-  
-  var folder = zip.folder(folderName);
-  var currentIdx = 0;
-  var errorCount = 0;
-  
-  var progressHtml = '<div style="text-align:center;padding:10px 0;">' +
-    '<h3 style="margin-top:0;color:#1a4d5c;">تجهيز ملفات الفعاليات</h3>' +
-    '<div style="background:#e1e8ed;border-radius:6px;height:14px;margin:20px 0;overflow:hidden;">' +
-      '<div id="zipProgressBar" style="background:linear-gradient(90deg, #1a4d5c, #2a7d9c);height:100%;width:0%;transition:width 0.3s ease;"></div>' +
-    '</div>' +
-    '<div id="zipProgressText" style="font-weight:bold;margin-bottom:8px;font-size:16px;">0 / ' + total + '</div>' +
-    '<div id="zipCurrentFile" class="hint" style="font-size:13px;height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">جاري بدء التحميل...</div>' +
-  '</div>';
-  
-  openModal('تصدير ZIP', progressHtml, '<button id="zipCancelBtn" class="btn btn-ghost" onclick="window._cancelZip=true; closeModal()">إلغاء</button>');
-  window._cancelZip = false;
-  
-  function processNext(){
-    if(window._cancelZip) {
-      toast('تم إلغاء التنزيل.','ok');
-      return;
-    }
-    if(currentIdx >= total){
-      var pText = document.getElementById('zipProgressText');
-      var cFile = document.getElementById('zipCurrentFile');
-      if(pText) pText.innerText = 'جاري ضغط الملفات...';
-      if(cFile) cFile.innerText = 'الرجاء الانتظار قليلاً';
-      var cancelBtn = document.getElementById('zipCancelBtn');
-      if(cancelBtn) cancelBtn.style.display = 'none';
-      
-      zip.generateAsync({type:"blob"}).then(function(content) {
-        if(window._cancelZip) return;
-        closeModal();
-        triggerBlobDownload(content, folderName + ".zip");
-        if(errorCount > 0){
-          toast('تم التحميل، لكن فشل تحميل ' + errorCount + ' ملف/ملفات.','err');
-        } else {
-          toast('تم تحميل جميع الفعاليات بنجاح.','ok');
-        }
-      }).catch(function(e){
-        closeModal();
-        toast('تعذّر ضغط الملفات.','err');
-      });
-      return;
-    }
+    var total = cached.length;
+    var zip = new JSZip();
+    var folderName = 'فعاليات_أثر';
+    if(filter.mode === 'month') folderName += '_' + filter.year + '_شهر_' + filter.month;
+    else if(filter.mode === 'quarter') folderName += '_' + filter.year + '_ربع_' + filter.quarter;
+    else if(filter.mode === 'half') folderName += '_' + filter.year + '_نصف_' + filter.half;
+    else if(filter.mode === 'year') folderName += '_' + filter.year;
     
-    var rec = cached[currentIdx];
-    var title = String(rec.title || 'بدون عنوان');
+    var folder = zip.folder(folderName);
+    var currentIdx = 0;
+    var errorCount = 0;
     
-    var progEl = document.getElementById('zipProgressBar');
-    var textEl = document.getElementById('zipProgressText');
-    var fileEl = document.getElementById('zipCurrentFile');
-    if(progEl) progEl.style.width = Math.round(((currentIdx+1) / total) * 100) + '%';
-    if(textEl) textEl.innerText = (currentIdx+1) + ' / ' + total;
-    if(fileEl) fileEl.innerText = 'تحميل: ' + title;
+    var progressHtml = '<div style="text-align:center;padding:10px 0;">' +
+      '<h3 style="margin-top:0;color:#1a4d5c;">تجهيز ملفات الفعاليات</h3>' +
+      '<div style="background:#e1e8ed;border-radius:6px;height:14px;margin:20px 0;overflow:hidden;">' +
+        '<div id="zipProgressBar" style="background:linear-gradient(90deg, #1a4d5c, #2a7d9c);height:100%;width:0%;transition:width 0.3s ease;"></div>' +
+      '</div>' +
+      '<div id="zipProgressText" style="font-weight:bold;margin-bottom:8px;font-size:16px;">0 / ' + total + '</div>' +
+      '<div id="zipCurrentFile" class="hint" style="font-size:13px;height:22px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">جاري بدء التحميل...</div>' +
+    '</div>';
     
-    run('exportActivityPdfDownload', rec.id, USER.no).then(function(r){
-      if(window._cancelZip) return;
-      if(r && r.ok && r.base64 && r.delivery === 'inline'){
-        folder.file((r.fileName || r.name || (title+'.pdf')), r.base64, {base64: true});
-      } else {
-        errorCount++;
+    openModal('تصدير ZIP', progressHtml, '<button id="zipCancelBtn" class="btn btn-ghost" onclick="window._cancelZip=true; closeModal()">إلغاء</button>');
+    window._cancelZip = false;
+    
+    function processNext(){
+      if(window._cancelZip) {
+        toast('تم إلغاء التنزيل.','ok');
+        return;
       }
-      currentIdx++;
-      processNext();
-    }).catch(function(e){
-      if(window._cancelZip) return;
-      errorCount++;
-      currentIdx++;
-      processNext();
-    });
-  }
-  
-  processNext();
+      if(currentIdx >= total){
+        var pText = document.getElementById('zipProgressText');
+        var cFile = document.getElementById('zipCurrentFile');
+        if(pText) pText.innerText = 'جاري ضغط الملفات...';
+        if(cFile) cFile.innerText = 'الرجاء الانتظار قليلاً';
+        var cancelBtn = document.getElementById('zipCancelBtn');
+        if(cancelBtn) cancelBtn.style.display = 'none';
+        
+        zip.generateAsync({type:"blob"}).then(function(content) {
+          if(window._cancelZip) return;
+          closeModal();
+          triggerBlobDownload(content, folderName + ".zip");
+          if(errorCount > 0){
+            toast('تم التحميل، لكن فشل تحميل ' + errorCount + ' ملف/ملفات.','err');
+          } else {
+            toast('تم تحميل جميع الفعاليات بنجاح.','ok');
+          }
+        }).catch(function(e){
+          closeModal();
+          toast('تعذّر ضغط الملفات.','err');
+        });
+        return;
+      }
+      
+      var rec = cached[currentIdx];
+      var title = String(rec.title || 'بدون عنوان');
+      
+      var progEl = document.getElementById('zipProgressBar');
+      var textEl = document.getElementById('zipProgressText');
+      var fileEl = document.getElementById('zipCurrentFile');
+      if(progEl) progEl.style.width = Math.round(((currentIdx+1) / total) * 100) + '%';
+      if(textEl) textEl.innerText = (currentIdx+1) + ' / ' + total;
+      if(fileEl) fileEl.innerText = 'تحميل: ' + title;
+      
+      run('exportActivityPdfDownload', rec.id, USER.no).then(function(r){
+        if(window._cancelZip) return;
+        if(r && r.ok && r.base64 && r.delivery === 'inline'){
+          folder.file((r.fileName || r.name || (title+'.pdf')), r.base64, {base64: true});
+        } else {
+          errorCount++;
+        }
+        currentIdx++;
+        processNext();
+      }).catch(function(e){
+        if(window._cancelZip) return;
+        errorCount++;
+        currentIdx++;
+        processNext();
+      });
+    }
+    
+    processNext();
+  }).catch(function(e){
+    restoreBusy(btn);
+    toast('تعذّر جلب البيانات: '+(e&&e.message||'خطأ غير معروف'),'err');
+  });
 }
 function setBusy(btn, text){
   if(!btn) return;
