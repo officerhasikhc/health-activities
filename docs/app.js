@@ -240,43 +240,43 @@ function yearOptions(sel){
 }
 function periodControlsHtml(prefix){
   var p=currentPeriod();
-  return '<div class="filters period-filters">'+
-    '<div class="field"><label>نوع الفترة</label><select id="'+prefix+'_mode" onchange="onPeriodModeChange(\''+prefix+'\',true)">'+
-      '<option value="month">الشهر</option>'+
-      '<option value="quarter">ربع السنة</option>'+
-      '<option value="half">نصف السنة</option>'+
-      '<option value="year">السنة</option>'+
-      '<option value="all">كل السجلات</option>'+
-    '</select></div>'+
-    '<div class="field period-year" id="'+prefix+'_yearWrap"><label>السنة</label><select id="'+prefix+'_year" onchange="periodReload(\''+prefix+'\')">'+yearOptions(p.year)+'</select></div>'+
-    '<div class="field period-month" id="'+prefix+'_monthWrap"><label>الشهر</label><select id="'+prefix+'_month" onchange="periodReload(\''+prefix+'\')">'+
-      AR_MONTHS_UI.map(function(m,i){ return '<option value="'+(i+1)+'" '+(p.month===i+1?'selected':'')+'>'+m+'</option>'; }).join('')+
-    '</select></div>'+
-    '<div class="field period-quarter" id="'+prefix+'_quarterWrap"><label>الربع</label><select id="'+prefix+'_quarter" onchange="periodReload(\''+prefix+'\')">'+
-      '<option value="1">الربع الأول</option><option value="2">الربع الثاني</option><option value="3">الربع الثالث</option><option value="4">الربع الرابع</option>'+
-    '</select></div>'+
-    '<div class="field period-half" id="'+prefix+'_halfWrap"><label>نصف السنة</label><select id="'+prefix+'_half" onchange="periodReload(\''+prefix+'\')">'+
-      '<option value="1">النصف الأول</option><option value="2">النصف الثاني</option>'+
+  var monthsHtml = AR_MONTHS_UI.map(function(m,i){ return '<option value="m'+(i+1)+'">'+m+'</option>'; }).join('');
+  return '<div class="filters period-filters" style="display:flex;gap:15px;flex-wrap:wrap;">'+
+    '<div class="field" id="'+prefix+'_yearWrap"><label>السنة</label><select id="'+prefix+'_year" onchange="periodReload(\''+prefix+'\')">'+yearOptions(p.year)+'</select></div>'+
+    '<div class="field"><label>الفترة</label><select id="'+prefix+'_period" onchange="onPeriodChange(\''+prefix+'\')">'+
+      '<option value="year">كامل السنة</option>'+
+      '<optgroup label="نصف سنوي">'+
+        '<option value="h1">النصف الأول</option><option value="h2">النصف الثاني</option>'+
+      '</optgroup>'+
+      '<optgroup label="ربع سنوي">'+
+        '<option value="q1">الربع الأول</option><option value="q2">الربع الثاني</option><option value="q3">الربع الثالث</option><option value="q4">الربع الرابع</option>'+
+      '</optgroup>'+
+      '<optgroup label="شهري">'+monthsHtml+'</optgroup>'+
+      '<option value="all">كل السجلات (جميع السنوات)</option>'+
     '</select></div>'+
   '</div>';
 }
 function initPeriodControls(prefix, initial){
   var p=Object.assign(currentPeriod(), initial||{});
-  var mode=document.getElementById(prefix+'_mode'); if(mode) mode.value=p.mode||'month';
   var y=document.getElementById(prefix+'_year'); if(y) y.value=String(p.year);
-  var m=document.getElementById(prefix+'_month'); if(m) m.value=String(p.month);
-  var q=document.getElementById(prefix+'_quarter'); if(q) q.value=String(p.quarter);
-  var h=document.getElementById(prefix+'_half'); if(h) h.value=String(p.half);
-  onPeriodModeChange(prefix,false);
+  
+  var per = document.getElementById(prefix+'_period');
+  if(per){
+    var mode = p.mode || 'month';
+    if(mode === 'all') per.value = 'all';
+    else if(mode === 'year') per.value = 'year';
+    else if(mode === 'half') per.value = 'h' + p.half;
+    else if(mode === 'quarter') per.value = 'q' + p.quarter;
+    else per.value = 'm' + p.month;
+  }
+  var yearWrap = document.getElementById(prefix+'_yearWrap');
+  if(yearWrap) yearWrap.classList.toggle('hidden', (p.mode||'month')==='all');
 }
-function onPeriodModeChange(prefix, reload){
-  var mode=val(prefix+'_mode')||'month';
-  function toggle(id,on){ var el=document.getElementById(prefix+'_'+id+'Wrap'); if(el) el.classList.toggle('hidden', !on); }
-  toggle('year', ['month','quarter','half','year'].indexOf(mode)>-1);
-  toggle('month', mode==='month');
-  toggle('quarter', mode==='quarter');
-  toggle('half', mode==='half');
-  if(reload) periodReload(prefix);
+function onPeriodChange(prefix){
+  var per = val(prefix+'_period');
+  var yearWrap = document.getElementById(prefix+'_yearWrap');
+  if(yearWrap) yearWrap.classList.toggle('hidden', per==='all');
+  periodReload(prefix);
 }
 function periodReload(prefix){
   if(prefix==='fl') loadRecords(true);
@@ -284,13 +284,22 @@ function periodReload(prefix){
 }
 function periodFilter(prefix){
   var p=currentPeriod();
-  var mode=val(prefix+'_mode')||'month';
+  var per=val(prefix+'_period') || ('m'+p.month);
+  var year=parseInt(val(prefix+'_year'),10)||p.year;
+  
+  var mode='month', m=p.month, q=p.quarter, h=p.half;
+  if(per==='all') mode='all';
+  else if(per==='year') mode='year';
+  else if(per.startsWith('h')) { mode='half'; h=parseInt(per.substring(1),10); }
+  else if(per.startsWith('q')) { mode='quarter'; q=parseInt(per.substring(1),10); }
+  else if(per.startsWith('m')) { mode='month'; m=parseInt(per.substring(1),10); }
+  
   return {
     mode: mode,
-    year: parseInt(val(prefix+'_year'),10)||p.year,
-    month: parseInt(val(prefix+'_month'),10)||p.month,
-    quarter: parseInt(val(prefix+'_quarter'),10)||p.quarter,
-    half: parseInt(val(prefix+'_half'),10)||p.half
+    year: year,
+    month: m,
+    quarter: q,
+    half: h
   };
 }
 function periodKey(prefix){ return JSON.stringify(periodFilter(prefix)); }
