@@ -100,6 +100,8 @@ var API_METHODS = {
   exportActivitiesZipDownload: true,
   getDashboard: true,
   getDashboardItems: true,
+  getActivityReportReadiness: true,
+  getPeriodReportReadiness: true,
   addConfigItem: true,
   removeConfigItem: true,
   setRequiredField: true,
@@ -839,6 +841,101 @@ function missingRequiredFields_(payload) {
   return missing;
 }
 
+function readinessIssue_(code, label, severity, detail) {
+  return {
+    code: code,
+    label: label || code,
+    severity: severity || 'blocking',
+    detail: detail || ''
+  };
+}
+
+function hasPhotoRefs_(activity) {
+  if (!activity) return false;
+  if (activity.photos && activity.photos.length) return true;
+  if (activity.existing_photo_ids && activity.existing_photo_ids.length) return true;
+  return String(activity.photo_ids || '').split(',').filter(Boolean).length > 0;
+}
+
+function reportReadinessForActivity_(activity, required) {
+  activity = activity || {};
+  required = required || {};
+  normalizeActivityTitle_(activity);
+
+  var blocking = [];
+  var warnings = [];
+  function hasText(v) { return String(v == null ? '' : v).trim() !== ''; }
+  function block(code, label, detail) { blocking.push(readinessIssue_(code, label, 'blocking', detail)); }
+  function warn(code, label, detail) { warnings.push(readinessIssue_(code, label, 'warning', detail)); }
+
+  if (!hasText(activity.type)) block('type', REQUIRED_FIELD_LABELS.type, 'نوع الفعالية مطلوب قبل التصدير.');
+  if (String(activity.type) === 'يوم عالمي') {
+    if (!hasText(activity.world_day)) block('world_day', REQUIRED_FIELD_LABELS.world_day, 'اسم اليوم العالمي مطلوب في التقرير.');
+  } else if (!hasText(activity.title)) {
+    block('title', REQUIRED_FIELD_LABELS.title, 'عنوان الفعالية مطلوب في التقرير.');
+  }
+  if (!hasText(activity.event_date)) block('event_date', REQUIRED_FIELD_LABELS.event_date, 'تاريخ التنفيذ مطلوب في التقرير.');
+  if (!hasText(activity.executor_no) && !hasText(activity.executor_name)) block('executor_no', REQUIRED_FIELD_LABELS.executor_no, 'اسم أو رقم المنفذة مطلوب في التقرير.');
+  if (required.photos && !hasPhotoRefs_(activity)) block('photos', REQUIRED_FIELD_LABELS.photos, 'الصور مطلوبة حسب إعدادات الإدارة.');
+  if (required.objective && !hasText(activity.objective)) block('objective', REQUIRED_FIELD_LABELS.objective, 'الهدف مطلوب حسب إعدادات الإدارة.');
+  if (required.location && !hasText(activity.location)) block('location', REQUIRED_FIELD_LABELS.location, 'المكان مطلوب حسب إعدادات الإدارة.');
+  if (required.beneficiaries && !hasText(activity.beneficiaries)) block('beneficiaries', REQUIRED_FIELD_LABELS.beneficiaries, 'عدد المستفيدين مطلوب حسب إعدادات الإدارة.');
+  if (required.target_groups && !normalizeList_(activity.target_groups).length) block('target_groups', REQUIRED_FIELD_LABELS.target_groups, 'الفئة المستهدفة مطلوبة حسب إعدادات الإدارة.');
+  if (required.mechanism && !normalizeList_(activity.mechanism || activity.mechanisms).length) block('mechanism', REQUIRED_FIELD_LABELS.mechanism, 'آلية التنفيذ مطلوبة حسب إعدادات الإدارة.');
+  if (required.partners && (activity.has_partnership === true || activity.has_partnership === 'true') && !normalizeList_(activity.partners).length) {
+    block('partners', REQUIRED_FIELD_LABELS.partners, 'الجهات الشريكة مطلوبة عند تفعيل الشراكة.');
+  }
+  if (String(activity.status || '') === 'جارٍ رفع الصور') {
+    warn('uploading', 'رفع الصور', 'قد لا يحتوي التقرير على كل الصور لأن الرفع لم يكتمل بعد.');
+  }
+
+  return {
+    ok: blocking.length === 0,
+    blocking: blocking,
+    warnings: warnings,
+    issueCount: blocking.length + warnings.length
+  };
+}
+
+function reportReadinessForRows_(rows, required) {
+  rows = rows || [];
+  var issueCounts = {};
+  var items = [];
+  var ready = 0;
+  var blockingCount = 0;
+  var warningCount = 0;
+
+  rows.forEach(function(row) {
+    var readiness = reportReadinessForActivity_(row, required);
+    if (readiness.ok && readiness.warnings.length === 0) ready++;
+    if (!readiness.ok) blockingCount++;
+    if (readiness.warnings.length) warningCount++;
+    readiness.blocking.concat(readiness.warnings).forEach(function(issue) {
+      issueCounts[issue.code] = (issueCounts[issue.code] || 0) + 1;
+    });
+    if (!readiness.ok || readiness.warnings.length) {
+      items.push({
+        id: row.id,
+        title: activityTitle_(row),
+        event_date: formatDate_(row.event_date),
+        blocking: readiness.blocking,
+        warnings: readiness.warnings
+      });
+    }
+  });
+
+  return {
+    ok: blockingCount === 0,
+    total: rows.length,
+    ready: ready,
+    blockingCount: blockingCount,
+    warningCount: warningCount,
+    issueCounts: issueCounts,
+    items: items.slice(0, 30),
+    truncated: items.length > 30
+  };
+}
+
 function findRowById_(sh, id) {
   var ids = sh.getRange(1,1,sh.getLastRow(),1).getValues();
   for (var i=1;i<ids.length;i++){ if (String(ids[i][0])===String(id)) return i+1; }
@@ -1066,6 +1163,26 @@ function getDashboardItems(empNo, dimension, key, filter) {
 }
 
 // ============================ التصدير PDF ============================
+function getActivityReportReadiness(id, actorEmpNo) {
+  var user = requireActiveUser_(actorEmpNo);
+  var activity = getActivityForExport_(id, user);
+  return {
+    ok: true,
+    readiness: reportReadinessForActivity_(activity, getRequiredFields_())
+  };
+}
+
+function getPeriodReportReadiness(filter, actorEmpNo) {
+  var user = requireActiveUser_(actorEmpNo);
+  var rows = filterActivityRows_(getVisibleActivityRows_(user), normalizePeriodFilter_(filter));
+  rows.sort(function(a,b){ return new Date(a.event_date) - new Date(b.event_date); });
+  return {
+    ok: true,
+    period: periodLabel_(filter),
+    readiness: reportReadinessForRows_(rows, getRequiredFields_())
+  };
+}
+
 function exportActivityPdf(id, actorEmpNo) {
   var user = requireActiveUser_(actorEmpNo);
   var activity = getActivityForExport_(id, user);

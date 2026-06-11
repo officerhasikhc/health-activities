@@ -47,7 +47,7 @@ test('activity readiness blocks required report fields', () => {
   }, { photos: true, partners: true });
 
   assert.equal(readiness.ok, false);
-  assert.deepEqual(readiness.blocking.map((issue) => issue.code), [
+  assert.deepEqual(Array.from(readiness.blocking.map((issue) => issue.code)), [
     'title',
     'event_date',
     'executor_no',
@@ -84,7 +84,7 @@ test('activity readiness warns while photos are still uploading', () => {
   }, { photos: true });
 
   assert.equal(readiness.ok, true);
-  assert.deepEqual(readiness.warnings.map((issue) => issue.code), ['uploading']);
+  assert.deepEqual(Array.from(readiness.warnings.map((issue) => issue.code)), ['uploading']);
 });
 
 test('period readiness summarizes row issues', () => {
