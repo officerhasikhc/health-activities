@@ -1,4 +1,4 @@
-var CACHE_NAME = 'athar-shell-v17';
+var CACHE_NAME = 'athar-shell-v18';
 var THUMB_CACHE = 'athar-thumbs-v1';
 var THUMB_MAX_AGE = 24 * 60 * 60 * 1000; // يوم واحد
 var SHELL = [
@@ -18,7 +18,7 @@ var SHELL = [
 self.addEventListener('install', function(event){
   event.waitUntil(caches.open(CACHE_NAME).then(function(cache){ return cache.addAll(SHELL); }));
   self.skipWaiting();
-});
+});ِ
 
 self.addEventListener('activate', function(event){
   event.waitUntil(
