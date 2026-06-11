@@ -37,11 +37,24 @@ function run(fn){
 
 /* ====================== التنبيهات ====================== */
 var toastT;
-function toast(msg, type){
+function toast(msg, type, detail){
   var t=document.getElementById('toast');
-  t.textContent=msg; t.className='show '+(type||'');
+  if(!t) return;
+  var icons={ok:'✓', err:'✕', warn:'!'};
+  var icon=icons[type]||'ℹ';
+  var ic=t.querySelector('.toast-icon');
+  var m=t.querySelector('.toast-msg');
+  t.setAttribute('role', type==='err'?'alert':'status');
+  t.setAttribute('aria-live', type==='err'?'assertive':'polite');
+  t.setAttribute('aria-atomic','true');
+  if(ic) ic.textContent=icon;
+  if(m){
+    m.innerHTML='<span class="toast-title">'+esc(msg||'')+'</span>'+
+      (detail?'<span class="toast-detail">'+esc(detail)+'</span>':'');
+  }
+  t.className='show '+(type||'');
   clearTimeout(toastT);
-  toastT=setTimeout(function(){ t.className=''; },2800);
+  toastT=setTimeout(function(){ t.className=''; }, detail?4200:3200);
 }
 
 /* ====================== الدخول (استدعاء واحد) ====================== */
@@ -857,7 +870,7 @@ function onSavedLocal(options, wasEdit){ invalidateCaches(); updatePending();
   show('records');
   if(typeof options==='string') options={ message:options };
   if(options && options.silent) return;
-  toast((options && options.message)||'تم الحفظ، وجارٍ الرفع.','ok');
+  toast((options && options.message)||'تم الحفظ محليًا','warn','جارٍ رفع الصور والبيانات عند توفر الاتصال.');
 }
 
 function resetForm(){
@@ -957,6 +970,7 @@ function paintRecords(list){
       thumb+
       '<div class="meta">'+
         '<div class="ttl" onclick="viewActivity(\''+o.id+'\')">'+esc(o.title)+'</div>'+
+        (isPending&&photoCount?'<div class="sync-note"><span class="sync-dot"></span><span>جارٍ رفع '+photoCount+' صورة</span></div>':'')+
         '<div class="row2">'+
           '<span class="badge">'+esc(typeLabel)+'</span>'+
           (isPending?'<span class="badge pending-badge">جارٍ الرفع</span>':'')+
@@ -969,11 +983,11 @@ function paintRecords(list){
           (photoCount?'<span class="fact"><i>الصور</i>'+photoCount+'</span>':'')+
         '</div>'+
       '</div>'+
-      '<div class="ops">'+
-        '<button class="btn btn-view btn-sm" onclick="viewActivity(\''+o.id+'\')"><span class="ico">◉</span> عرض</button>'+
-        (isPending?'':'<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>')+
-        (isPending?'':'<button class="btn btn-print btn-sm" id="pdfBtn_'+escAttr(o.id)+'" onclick="prepareExportPdf(\''+o.id+'\')"><span class="ico">⤓</span> تحميل PDF</button>')+
-        (isPending?'':'<button class="btn btn-danger-outline btn-sm" id="delBtn_'+escAttr(o.id)+'" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>')+
+      '<div class="ops record-actions" aria-label="إجراءات الفعالية">'+
+        '<button class="btn btn-view btn-sm btn-command btn-command-primary" onclick="viewActivity(\''+o.id+'\')"><span class="ico" aria-hidden="true">◉</span><span>عرض</span></button>'+
+        (isPending?'':'<button class="btn btn-edit btn-sm btn-command" onclick="editActivity(\''+o.id+'\')"><span class="ico" aria-hidden="true">✎</span><span>تعديل</span></button>')+
+        (isPending?'':'<button class="btn btn-print btn-sm btn-command" id="pdfBtn_'+escAttr(o.id)+'" onclick="prepareExportPdf(\''+o.id+'\')"><span class="ico" aria-hidden="true">⇩</span><span>PDF</span></button>')+
+        (isPending?'':'<button class="btn btn-danger-text btn-sm btn-command" id="delBtn_'+escAttr(o.id)+'" aria-label="حذف '+escAttr(o.title)+'" onclick="askDelete(\''+o.id+'\')"><span>حذف</span></button>')+
       '</div></div>';
   }).join('');
 }
@@ -1058,7 +1072,7 @@ function askDelete(id){
     run('deleteActivity',id,USER.no).then(function(r){
       if(r.ok){ 
         invalidateCaches(); 
-        toast('تم الحذف.','ok'); 
+        toast('تم الحذف','ok','أزيلت الفعالية من السجل.');
         var card = document.getElementById('rec_'+id);
         if(card){
           card.style.transition = 'all 0.3s ease';
@@ -1089,7 +1103,7 @@ function askDelete(id){
       }
       else {
         if(btn) restoreBusy(btn);
-        toast('تعذّر الحذف.','err');
+        toast('لم يكتمل الحذف','err','لم تتغير البيانات. أعد المحاولة.');
       }
     });
   }, true);

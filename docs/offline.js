@@ -149,6 +149,7 @@ function syncOutbox() {
     if (r.sent > 0) {
       if (typeof invalidateCaches === 'function') invalidateCaches();
       if (typeof loadRecords === 'function' && document.getElementById('recList')) loadRecords(true);
+      if (typeof toast === 'function') toast('تم الرفع','ok','أصبحت الفعالية متاحة في السجل والتقارير.');
     }
   });
 }
