@@ -5,3 +5,4 @@ node_modules/
 Thumbs.db
 .env
 src/.clasp.json
+.superpowers/
