@@ -972,7 +972,7 @@ function paintRecords(list){
       '<div class="ops">'+
         '<button class="btn btn-view btn-sm" onclick="viewActivity(\''+o.id+'\')"><span class="ico">◉</span> عرض</button>'+
         (isPending?'':'<button class="btn btn-edit btn-sm" onclick="editActivity(\''+o.id+'\')"><span class="ico">✎</span> تعديل</button>')+
-        (isPending?'':'<button class="btn btn-print btn-sm" id="pdfBtn_'+escAttr(o.id)+'" onclick="exportPdf(\''+o.id+'\')"><span class="ico">⤓</span> تحميل PDF</button>')+
+        (isPending?'':'<button class="btn btn-print btn-sm" id="pdfBtn_'+escAttr(o.id)+'" onclick="prepareExportPdf(\''+o.id+'\')"><span class="ico">⤓</span> تحميل PDF</button>')+
         (isPending?'':'<button class="btn btn-danger-outline btn-sm" id="delBtn_'+escAttr(o.id)+'" onclick="askDelete(\''+o.id+'\')"><span class="ico">×</span> حذف</button>')+
       '</div></div>';
   }).join('');
@@ -1095,11 +1095,79 @@ function askDelete(id){
   }, true);
 }
 
-function exportPdf(id){
+function readinessIssueListHtml(items, emptyText){
+  items = items || [];
+  if(!items.length) return '<div class="hint">'+esc(emptyText||'لا توجد ملاحظات.')+'</div>';
+  return '<ul class="readiness-list">'+items.map(function(issue){
+    return '<li class="readiness-item '+escAttr(issue.severity||'blocking')+'">'+
+      '<b>'+esc(issue.label||issue.code||'تنبيه')+'</b>'+
+      '<span>'+esc(issue.detail||'راجع بيانات الفعالية قبل التصدير.')+'</span>'+
+    '</li>';
+  }).join('')+'</ul>';
+}
+
+function readinessSummaryHtml(readiness){
+  readiness = readiness || {};
+  if(readiness.items && readiness.items.length){
+    return '<div class="readiness-records">'+readiness.items.map(function(item){
+      return '<div class="readiness-record">'+
+        '<b>'+esc(item.title||item.id||'فعالية')+'</b>'+
+        '<span>'+esc(item.event_date||'')+'</span>'+
+        readinessIssueListHtml((item.blocking||[]).concat(item.warnings||[]), '')+
+      '</div>';
+    }).join('')+
+    (readiness.truncated?'<div class="hint">تم عرض أول 30 فعالية تحتاج مراجعة.</div>':'')+
+    '</div>';
+  }
+  return readinessIssueListHtml((readiness.blocking||[]).concat(readiness.warnings||[]), 'البيانات جاهزة للتصدير.');
+}
+
+function showReadinessModal(title, readiness, onProceed){
+  readiness = readiness || {};
+  var hasBlocking = (readiness.blocking && readiness.blocking.length) || readiness.blockingCount > 0;
+  var hasWarnings = (readiness.warnings && readiness.warnings.length) || readiness.warningCount > 0;
+  var intro = hasBlocking
+    ? 'توجد نواقص تمنع التقرير من الظهور كمكتمل. راجعها قبل التصدير.'
+    : 'توجد ملاحظات غير مانعة. يمكنك المتابعة إذا كانت مقبولة.';
+  var body = '<p class="readiness-intro">'+esc(intro)+'</p>'+readinessSummaryHtml(readiness);
+  var footer = '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>';
+  if(!hasBlocking && hasWarnings){
+    window._readinessProceed = function(){ closeModal(); onProceed(); };
+    footer += '<button class="btn btn-primary" onclick="window._readinessProceed()">تصدير رغم الملاحظات</button>';
+  }
+  openModal(title, body, footer);
+}
+
+function shouldProceedAfterReadiness(readiness, onProceed, title){
+  readiness = readiness || {};
+  var hasBlocking = (readiness.blocking && readiness.blocking.length) || readiness.blockingCount > 0;
+  var hasWarnings = (readiness.warnings && readiness.warnings.length) || readiness.warningCount > 0;
+  if(hasBlocking || hasWarnings){
+    showReadinessModal(title, readiness, onProceed);
+    return false;
+  }
+  return true;
+}
+
+function prepareExportPdf(id){
   var o=window._recs[id]; if(!o) return;
   var btn=document.getElementById('pdfBtn_'+id);
-  setBusy(btn, 'جارٍ تجهيز الملف…');
-  run('exportActivityPdfDownload',id,USER.no).then(function(r){
+  setBusy(btn, 'جارٍ فحص البيانات…');
+  run('getActivityReportReadiness', id, USER.no).then(function(r){
+    restoreBusy(btn);
+    if(!r || !r.ok){ toast((r&&r.msg)||'تعذّر فحص جاهزية التقرير.','err'); return; }
+    var proceed=function(){ exportPdfDirect(id); };
+    if(shouldProceedAfterReadiness(r.readiness, proceed, 'جاهزية تقرير PDF')) return proceed();
+  }).catch(function(e){
+    restoreBusy(btn);
+    toast((e&&e.message)||'تعذّر فحص جاهزية التقرير.','err');
+  });
+}
+
+function exportPdfDirect(id){
+  var btn=document.getElementById('pdfBtn_'+id);
+  setBusy(btn, 'جارٍ إنشاء PDF…');
+  run('exportActivityPdfDownload', id, USER.no).then(function(r){
     restoreBusy(btn);
     if(r&&r.ok) handleDownloadResponse(r, 'PDF');
     else toast((r&&r.msg)||'تعذّر إنشاء PDF.','err');
@@ -1108,10 +1176,26 @@ function exportPdf(id){
     toast((e&&e.message)||'تعذّر إنشاء PDF.','err');
   });
 }
+
 function exportExcel(){
   var btn=document.getElementById('excelBtn');
+  var filter=periodFilter('fl');
+  setBusy(btn, 'جارٍ فحص البيانات…');
+  run('getPeriodReportReadiness', filter, USER.no).then(function(r){
+    restoreBusy(btn);
+    if(!r || !r.ok){ toast((r&&r.msg)||'تعذّر فحص جاهزية التصدير.','err'); return; }
+    var proceed=function(){ exportExcelDirect(filter); };
+    if(shouldProceedAfterReadiness(r.readiness, proceed, 'جاهزية تصدير Excel')) return proceed();
+  }).catch(function(e){
+    restoreBusy(btn);
+    toast((e&&e.message)||'تعذّر فحص جاهزية التصدير.','err');
+  });
+}
+
+function exportExcelDirect(filter){
+  var btn=document.getElementById('excelBtn');
   setBusy(btn, 'جارٍ تجهيز الملف…');
-  run('exportActivitiesExcelDownload', periodFilter('fl'), USER.no).then(function(r){
+  run('exportActivitiesExcelDownload', filter || periodFilter('fl'), USER.no).then(function(r){
     restoreBusy(btn);
     if(r&&r.ok) handleDownloadResponse(r, 'Excel');
     else toast((r&&r.msg)||'تعذّر إنشاء Excel.','err');
@@ -1120,9 +1204,25 @@ function exportExcel(){
     toast((e&&e.message)||'تعذّر إنشاء Excel.','err');
   });
 }
+
 function exportZip(){
   var btn=document.getElementById('zipBtn');
   var filter=periodFilter('fl');
+  setBusy(btn, 'جارٍ فحص البيانات…');
+  run('getPeriodReportReadiness', filter, USER.no).then(function(r){
+    restoreBusy(btn);
+    if(!r || !r.ok){ toast((r&&r.msg)||'تعذّر فحص جاهزية التصدير.','err'); return; }
+    var proceed=function(){ exportZipDirect(filter); };
+    if(shouldProceedAfterReadiness(r.readiness, proceed, 'جاهزية تحميل ZIP')) return proceed();
+  }).catch(function(e){
+    restoreBusy(btn);
+    toast((e&&e.message)||'تعذّر فحص جاهزية التصدير.','err');
+  });
+}
+
+function exportZipDirect(filter){
+  var btn=document.getElementById('zipBtn');
+  filter=filter || periodFilter('fl');
 
   if(typeof JSZip === 'undefined'){
     var quickCached=REC_CACHE[filterKey(filter)];
