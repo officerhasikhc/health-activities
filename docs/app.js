@@ -209,7 +209,7 @@ function boot(){
 function renderTabs(){
   var tabs=[
     {id:'register', label:'تسجيل فعالية'},
-    {id:'records',  label:'البرامج الصحية'},
+    {id:'records',  label:'البرامج والمبادرات'},
     {id:'dashboard',label:'المؤشرات'}
   ];
   if(USER.role==='admin') tabs.push({id:'admin', label:'الإدارة'});
@@ -302,7 +302,7 @@ function periodControlsHtml(prefix){
         '<option value="q1">الربع الأول</option><option value="q2">الربع الثاني</option><option value="q3">الربع الثالث</option><option value="q4">الربع الرابع</option>'+
       '</optgroup>'+
       '<optgroup label="شهري">'+monthsHtml+'</optgroup>'+
-      '<option value="all">كل السجلات (جميع السنوات)</option>'+
+      '<option value="all">جميع البرامج (كل السنوات)</option>'+
     '</select></div>'+
     empHtml +
   '</div>';
@@ -884,8 +884,8 @@ function resetForm(){
 function renderRecords(){
   document.getElementById('view').innerHTML=
     '<div class="card">'+
-    '<h2>سجل البرامج الصحية</h2>'+
-    '<p class="sub">'+(USER.role==='admin'?'جميع البرامج المسجلة.':'برامجك المسجلة.')+'</p>'+
+    '<h2>سجل البرامج والمبادرات الصحية</h2>'+
+    '<p class="sub">'+(USER.role==='admin'?'جميع البرامج والمبادرات المسجلة.':'برامجك ومبادراتك المسجلة.')+'</p>'+
     periodControlsHtml('fl')+
     '<div class="filters action-filters">'+
       '<div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadRecords(true)">تحديث</button></div>'+
@@ -1299,7 +1299,7 @@ function showDownloadFallback(r, label){
   var reason=r.reason==='count'?'عدد الملفات كبير، لذلك سيتم التحميل عبر الرابط الاحتياطي.':'الملف كبير، لذلك سيتم التحميل عبر الرابط الاحتياطي.';
   var meta=[];
   if(r.period) meta.push('الفترة: '+r.period);
-  if(r.count!=null) meta.push('عدد السجلات: '+r.count);
+  if(r.count!=null) meta.push('عدد البرامج: '+r.count);
   openModal('تحميل '+esc(label||'الملف'),
     '<p style="margin:0 0 10px">'+esc(reason)+'</p>'+
     (meta.length?'<div class="hint">'+esc(meta.join(' · '))+'</div>':''),
@@ -1495,8 +1495,8 @@ function renderAdmin(){
     requiredFieldsBlock()+
   '</div>'+
   '<div class="card"><h2>التصدير</h2>'+
-    '<p class="sub">تصدير PDF متاح من زر PDF داخل سجل البرامج الصحية، وتصدير Excel متاح من السجل حسب الفترة المختارة.</p>'+
-    '<button class="btn btn-excel" onclick="show(\'records\')">الانتقال للسجل</button>'+
+    '<p class="sub">تصدير PDF متاح من زر PDF داخل سجل البرامج والمبادرات الصحية، وتصدير Excel متاح حسب الفترة المختارة.</p>'+
+    '<button class="btn btn-excel" onclick="show(\'records\')">الانتقال للبرامج</button>'+
   '</div>';
 }
 function requiredFieldsBlock(){

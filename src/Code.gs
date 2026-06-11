@@ -927,10 +927,18 @@ function filterActivityRows_(rows, filter) {
 
 function periodLabel_(filter) {
   filter = normalizePeriodFilter_(filter);
-  if (filter.mode === 'all') return 'كل السجلات';
+  if (filter.mode === 'all') return 'جميع البرامج والمبادرات';
   if (filter.mode === 'year') return 'سنة ' + filter.year;
-  if (filter.mode === 'half') return (filter.half === 1 ? 'النصف الأول' : 'النصف الثاني') + ' ' + filter.year;
-  if (filter.mode === 'quarter') return 'الربع ' + ['','الأول','الثاني','الثالث','الرابع'][filter.quarter] + ' ' + filter.year;
+  if (filter.mode === 'half') {
+    var halfName = filter.half === 1 ? 'النصف الأول' : 'النصف الثاني';
+    var halfRange = filter.half === 1 ? 'يناير – يونيو' : 'يوليو – ديسمبر';
+    return halfName + ' ' + filter.year + ' (' + halfRange + ')';
+  }
+  if (filter.mode === 'quarter') {
+    var qNames = ['','الأول','الثاني','الثالث','الرابع'];
+    var qRanges = ['','يناير – مارس','أبريل – يونيو','يوليو – سبتمبر','أكتوبر – ديسمبر'];
+    return 'الربع ' + qNames[filter.quarter] + ' ' + filter.year + ' (' + qRanges[filter.quarter] + ')';
+  }
   return AR_MONTHS[filter.month - 1] + ' ' + filter.year;
 }
 
@@ -1183,22 +1191,29 @@ function buildActivitiesExcelBlob_(filter, user) {
   var period = normalizePeriodFilter_(filter);
   var periodLabel = periodLabel_(period);
   var rows = filterActivityRows_(getVisibleActivityRows_(user), period);
-  rows.sort(function(a,b){ return new Date(b.event_date) - new Date(a.event_date); });
+  rows.sort(function(a,b){ return new Date(a.event_date) - new Date(b.event_date); });
 
   var preparedAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Muscat', 'yyyy/MM/dd HH:mm');
   var temp = SpreadsheetApp.create('تقرير أثر مؤقت - ' + preparedAt);
   var sh = temp.getSheets()[0];
-  sh.setName('سجل الفعاليات');
+  sh.setName('البرامج والمبادرات الصحية');
   try { sh.setRightToLeft(true); } catch (e) {}
 
   var headers = [
-    'تاريخ التنفيذ','الشهر','الربع','نصف السنة','النوع','العنوان / اسم اليوم العالمي',
+    'م','تاريخ التنفيذ','الشهر','الربع','نصف السنة','النوع','العنوان / اسم اليوم العالمي',
     'الهدف','الفئة المستهدفة','المكان','آلية التنفيذ','عدد المستفيدين',
     'شراكات','الجهات المشاركة','المنفذة','ملاحظات','عدد الصور'
   ];
-  var data = rows.map(function(o){
+  var totalBeneficiaries = 0;
+  var totalPhotos = 0;
+  var data = rows.map(function(o, idx){
     var ym = activityYearMonth_(o);
+    var ben = parseInt(o.beneficiaries, 10);
+    if (!isNaN(ben)) totalBeneficiaries += ben;
+    var pCount = String(o.photo_ids || '').split(',').filter(Boolean).length;
+    totalPhotos += pCount;
     return [
+      idx + 1,
       formatDate_(o.event_date),
       o.month_name || (ym.month ? AR_MONTHS[ym.month - 1] : ''),
       o.quarter || '',
@@ -1214,19 +1229,52 @@ function buildActivitiesExcelBlob_(filter, user) {
       o.partners || '',
       o.executor_name || '',
       o.notes || '',
-      String(o.photo_ids || '').split(',').filter(Boolean).length
+      pCount
     ];
   });
 
-  sh.getRange(1, 1).setValue('تقرير سجل الفعاليات');
-  sh.getRange(2, 1).setValue('إعداد: ' + (user.name || user.emp_no));
-  sh.getRange(3, 1).setValue('تاريخ الإعداد: ' + preparedAt);
-  sh.getRange(4, 1).setValue('الفترة: ' + periodLabel);
-  sh.getRange(5, 1).setValue('عدد السجلات: ' + rows.length);
-  sh.getRange(7, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#1a4d5c').setFontColor('#ffffff');
-  if (data.length) sh.getRange(8, 1, data.length, headers.length).setValues(data);
-  sh.setFrozenRows(7);
+  // صف العناوين في السطر 1
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold')
+    .setBackground('#1a4d5c').setFontColor('#ffffff').setHorizontalAlignment('center')
+    .setVerticalAlignment('middle').setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  sh.setRowHeight(1, 36);
+
+  // البيانات تبدأ من السطر 2
+  if (data.length) {
+    sh.getRange(2, 1, data.length, headers.length).setValues(data);
+    // ألوان صفوف متناوبة
+    for (var r = 0; r < data.length; r++) {
+      if (r % 2 === 1) {
+        sh.getRange(r + 2, 1, 1, headers.length).setBackground('#f4f8f9');
+      }
+    }
+    // محاذاة عمود م (الترقيم) وعدد الصور والمستفيدين
+    sh.getRange(2, 1, data.length, 1).setHorizontalAlignment('center');
+    sh.getRange(2, 12, data.length, 1).setHorizontalAlignment('center');
+    sh.getRange(2, 17, data.length, 1).setHorizontalAlignment('center');
+  }
+
+  // حدود الجدول
+  var tableRows = 1 + data.length;
+  if (tableRows > 0) {
+    sh.getRange(1, 1, tableRows, headers.length).setBorder(true, true, true, true, true, true,
+      '#d0d7db', SpreadsheetApp.BorderStyle.SOLID);
+  }
+
+  // بيانات التقرير أسفل الجدول
+  var footerStart = data.length + 3;
+  sh.getRange(footerStart, 1).setValue('تقرير البرامج والمبادرات الصحية').setFontWeight('bold').setFontSize(12).setFontColor('#1a4d5c');
+  sh.getRange(footerStart + 1, 1).setValue('الفترة: ' + periodLabel).setFontColor('#3a5a66');
+  sh.getRange(footerStart + 2, 1).setValue('عدد البرامج والمبادرات الصحية المنفذة: ' + rows.length).setFontColor('#3a5a66');
+  sh.getRange(footerStart + 3, 1).setValue('إجمالي المستفيدين: ' + totalBeneficiaries).setFontColor('#3a5a66');
+  sh.getRange(footerStart + 4, 1).setValue('إجمالي الصور: ' + totalPhotos).setFontColor('#3a5a66');
+  sh.getRange(footerStart + 5, 1).setValue('إعداد: ' + (user.name || user.emp_no)).setFontColor('#5b6b7b');
+  sh.getRange(footerStart + 6, 1).setValue('تاريخ الإعداد: ' + preparedAt).setFontColor('#5b6b7b');
+
+  sh.setFrozenRows(1);
   sh.autoResizeColumns(1, headers.length);
+  // عرض أدنى لعمود م
+  sh.setColumnWidth(1, 40);
   SpreadsheetApp.flush();
 
   var fileName = safeFileName_('تقرير أثر - ' + (user.name || user.emp_no) + ' - ' + periodLabel) + '.xlsx';

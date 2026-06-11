@@ -37,10 +37,10 @@
   .topbar-spacer{flex:1}
   .who{font-size:12px;text-align:left;color:#dfe9ea;display:flex;align-items:center;gap:8px}
   .who b{display:block;font-size:12.5px;color:#fff;line-height:1.2}
-  .bell-btn{position:relative;cursor:pointer;background:none;border:1px solid rgba(255,255,255,.25);
-    border-radius:4px;padding:4px 5px;color:rgba(255,255,255,.8);display:flex;align-items:center;
+  .bell-btn{position:relative;cursor:pointer;background:none;border:none;
+    border-radius:4px;padding:4px;color:rgba(255,255,255,.75);display:flex;align-items:center;
     justify-content:center;transition:all .15s ease;line-height:0}
-  .bell-btn:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.4);color:#fff}
+  .bell-btn:hover{color:#fff;background:rgba(255,255,255,.08)}
   .bell-badge{position:absolute;top:-5px;right:-5px;background:var(--err);color:#fff;
     font-size:9px;font-weight:700;min-width:14px;height:14px;line-height:14px;
     padding:0 3px;border-radius:7px;text-align:center}
