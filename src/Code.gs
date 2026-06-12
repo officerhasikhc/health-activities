@@ -44,6 +44,7 @@ var INLINE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
 var ZIP_INLINE_DOWNLOAD_MAX_BYTES = 30 * 1024 * 1024;
 var ZIP_INLINE_MAX_COUNT = 12;
 var ZIP_DRIVE_MAX_COUNT = 35;
+var PERIOD_PDF_MAX_COUNT = 35;
 var REQUIRED_LOCKED_FIELDS = ['type','title','event_date','executor_no'];
 var REQUIRED_FIELD_DEFAULTS = {
   objective: true,
@@ -97,6 +98,7 @@ var API_METHODS = {
   exportActivityPdfDownload: true,
   exportActivitiesExcel: true,
   exportActivitiesExcelDownload: true,
+  exportActivitiesPdfDownload: true,
   exportActivitiesZipDownload: true,
   getDashboard: true,
   getDashboardItems: true,
@@ -1197,6 +1199,26 @@ function exportActivityPdfDownload(id, actorEmpNo) {
   return downloadableBlobResponse_(pdf, getReportRoot_(), {}, INLINE_DOWNLOAD_MAX_BYTES);
 }
 
+function exportActivitiesPdfDownload(filter, actorEmpNo) {
+  var user = requireActiveUser_(actorEmpNo);
+  var period = normalizePeriodFilter_(filter);
+  var periodLabel = periodLabel_(period);
+  var rows = filterActivityRows_(getVisibleActivityRows_(user), period);
+  rows.sort(function(a,b){ return new Date(a.event_date) - new Date(b.event_date); });
+  if (!rows.length) return { ok:false, msg:'لا توجد فعاليات ضمن الفترة المختارة.' };
+  if (rows.length > PERIOD_PDF_MAX_COUNT) {
+    return { ok:false, msg:'عدد التقارير كبير جدًا للتجهيز في PDF واحد. اختر فترة أصغر أو صدّر Excel.' };
+  }
+  var blob = buildActivitiesPeriodPdfBlob_(rows, periodLabel, user);
+  var response = downloadableBlobResponse_(blob, getReportRoot_(), {
+    count: rows.length,
+    period: periodLabel
+  }, INLINE_DOWNLOAD_MAX_BYTES);
+  response.count = rows.length;
+  response.period = periodLabel;
+  return response;
+}
+
 function getActivityForExport_(id, user) {
   var sh = activitiesSheet_();
   var rowIndex = findRowById_(sh, id);
@@ -1222,6 +1244,25 @@ function buildActivityPdfBlob_(activity, fileNameOverride) {
   var activityTitle = activityTitle_(activity);
   var fileName = fileNameOverride ||
     (safeFileName_('تقرير ' + formatDate_(activity.event_date) + ' - ' + activityTitle) + '.pdf');
+  return Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
+    .getAs(MimeType.PDF)
+    .setName(fileName);
+}
+
+function buildActivitiesPeriodPdfBlob_(rows, periodLabel, user) {
+  var letter = getOfficialLetterBlob_();
+  var letterDataUri = letter ? blobDataUri_(letter) : '';
+  var photosById = {};
+  rows.forEach(function(activity){
+    activity.display_type = activity.display_type || activityDisplayType_(activity);
+    String(activity.photo_ids || '').split(',').filter(Boolean).forEach(function(pid){
+      if (photosById[pid]) return;
+      try { photosById[pid] = blobDataUri_(DriveApp.getFileById(pid).getBlob()); }
+      catch (e) { photosById[pid] = ''; }
+    });
+  });
+  var html = buildActivitiesPeriodPdfHtml_(rows, letterDataUri, photosById);
+  var fileName = safeFileName_('تقرير أثر PDF - ' + (user.name || user.emp_no) + ' - ' + periodLabel) + '.pdf';
   return Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
     .getAs(MimeType.PDF)
     .setName(fileName);
@@ -1511,7 +1552,12 @@ function pdfRow_(label, value) {
   return '<div class="row"><span>' + html_(label) + '</span><b>' + html_(value) + '</b></div>';
 }
 
-function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
+function pdfDocumentCss_(letterDataUri) {
+  var pageBgCss = letterDataUri ? '' : 'background:#fff;border:1px solid #dfe4ea;';
+  return '@page{size:A4;margin:0}html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#1d2733}.page{width:210mm;height:297mm;position:relative;box-sizing:border-box;page-break-after:always;' + pageBgCss + 'overflow:hidden}.page:last-child{page-break-after:auto}.period-break{page-break-before:always}.page-bg{position:absolute;top:0;left:0;width:210mm;height:297mm;z-index:-1;object-fit:cover;display:block}.pdf-header{position:absolute;top:45mm;right:13mm;font-size:13pt;font-weight:bold;color:#123a46;text-align:right;line-height:1.4;z-index:2}.pdf-footer{position:absolute;bottom:30mm;left:30mm;right:15mm;font-size:12.5pt;color:#123a46;z-index:2}.pdf-footer .prep{position:absolute;right:0;bottom:0;font-weight:bold}.pdf-footer .appr{position:absolute;left:0;bottom:0;font-weight:bold}.content{position:absolute;inset:55mm 15mm 30mm 15mm;z-index:1}.first h1{position:relative;top:10mm;right:7mm;font-size:19pt;margin:0 0 8mm;text-align:center;color:#123a46}.row{display:grid;grid-template-columns:38mm 1fr;gap:5mm;border-bottom:1px solid #dfe4ea;padding:3.8mm 0;font-size:11.5pt;line-height:1.6}.row span{color:#5b6b7b;font-weight:bold}.row b{font-weight:500;white-space:pre-wrap}.photos h2{font-size:15pt;margin:0 0 6mm;text-align:center;color:#123a46}.photo-list{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:minmax(100px, 1fr);gap:10mm;height:190mm}figure{margin:0;border:1px solid #dfe4ea;padding:2.5mm;background:rgba(255,255,255,.92);display:flex;flex-direction:column;gap:1.5mm;box-shadow:0 2px 6px rgba(0,0,0,.05)}figure img{width:100%;height:80mm;object-fit:contain}figcaption{text-align:center;color:#5b6b7b;font-size:11pt;font-weight:bold}';
+}
+
+function activityPdfSectionsHtml_(a, letterDataUri, photoDataUris, forceBreak) {
   var typeLabel = a.display_type || a.type || '';
   var title = activityTitle_(a);
   var titleLabel = String(a.type || '') === 'يوم عالمي' ? 'اسم اليوم العالمي' : 'العنوان';
@@ -1529,12 +1575,11 @@ function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
     pdfRow_('ملاحظات', a.notes);
 
   var bgImg = letterDataUri ? '<img class="page-bg" src="' + letterDataUri + '">' : '';
-  
   var headerHtml = '<div class="pdf-header">المديرية العامة للخدمات الصحية بمحافظة ظفار<br>التجمع الصحي (2)- مركز حاسك الصحي</div>';
   var footerHtml = '<div class="pdf-footer"><div class="appr">اعتماد:</div><div class="prep">تم الاعداد : ' + html_(a.executor_name) + '</div></div>';
-
+  var firstClass = forceBreak ? 'page period-break' : 'page';
   var pages = [];
-  pages.push('<section class="page">' + bgImg + headerHtml + '<main class="content first"><h1>تقرير توثيق فعالية</h1>' + details + '</main>' + footerHtml + '</section>');
+  pages.push('<section class="' + firstClass + '">' + bgImg + headerHtml + '<main class="content first"><h1>تقرير توثيق فعالية</h1>' + details + '</main>' + footerHtml + '</section>');
 
   for (var i = 0; i < photoDataUris.length; i += 4) {
     var chunk = photoDataUris.slice(i, i + 4).map(function(src, n){
@@ -1542,9 +1587,25 @@ function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
     }).join('');
     pages.push('<section class="page">' + bgImg + headerHtml + '<main class="content photos"><h2>' + html_(title) + '</h2><div class="photo-list">' + chunk + '</div></main></section>');
   }
+  return pages.join('');
+}
 
-  var pageBgCss = letterDataUri ? '' : 'background:#fff;border:1px solid #dfe4ea;';
+function buildActivityPdfHtml_(a, letterDataUri, photoDataUris) {
   return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
-    '<style>@page{size:A4;margin:0}html,body{margin:0;padding:0;font-family:Arial,Tahoma,sans-serif;color:#1d2733}.page{width:210mm;height:297mm;position:relative;box-sizing:border-box;page-break-after:always;' + pageBgCss + 'overflow:hidden}.page:last-child{page-break-after:auto}.page-bg{position:absolute;top:0;left:0;width:210mm;height:297mm;z-index:-1;object-fit:cover;display:block}.pdf-header{position:absolute;top:45mm;right:13mm;font-size:13pt;font-weight:bold;color:#123a46;text-align:right;line-height:1.4;z-index:2}.pdf-footer{position:absolute;bottom:30mm;left:30mm;right:15mm;font-size:12.5pt;color:#123a46;z-index:2}.pdf-footer .prep{position:absolute;right:0;bottom:0;font-weight:bold}.pdf-footer .appr{position:absolute;left:0;bottom:0;font-weight:bold}.content{position:absolute;inset:55mm 15mm 30mm 15mm;z-index:1}.first h1{position:relative;top:10mm;right:7mm;font-size:19pt;margin:0 0 8mm;text-align:center;color:#123a46}.row{display:grid;grid-template-columns:38mm 1fr;gap:5mm;border-bottom:1px solid #dfe4ea;padding:3.8mm 0;font-size:11.5pt;line-height:1.6}.row span{color:#5b6b7b;font-weight:bold}.row b{font-weight:500;white-space:pre-wrap}.photos h2{font-size:15pt;margin:0 0 6mm;text-align:center;color:#123a46}.photo-list{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:minmax(100px, 1fr);gap:10mm;height:190mm}figure{margin:0;border:1px solid #dfe4ea;padding:2.5mm;background:rgba(255,255,255,.92);display:flex;flex-direction:column;gap:1.5mm;box-shadow:0 2px 6px rgba(0,0,0,.05)}figure img{width:100%;height:80mm;object-fit:contain}figcaption{text-align:center;color:#5b6b7b;font-size:11pt;font-weight:bold}</style>' +
-    '</head><body>' + pages.join('') + '</body></html>';
+    '<style>' + pdfDocumentCss_(letterDataUri) + '</style>' +
+    '</head><body>' + activityPdfSectionsHtml_(a, letterDataUri, photoDataUris || [], false) + '</body></html>';
+}
+
+function buildActivitiesPeriodPdfHtml_(activities, letterDataUri, photosById) {
+  activities = activities || [];
+  photosById = photosById || {};
+  var sections = activities.map(function(activity, index){
+    activity.display_type = activity.display_type || activityDisplayType_(activity);
+    var ids = String(activity.photo_ids || '').split(',').filter(Boolean);
+    var photoDataUris = ids.map(function(pid){ return photosById[pid] || ''; }).filter(Boolean);
+    return activityPdfSectionsHtml_(activity, letterDataUri || '', photoDataUris, index > 0);
+  }).join('');
+  return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
+    '<style>' + pdfDocumentCss_(letterDataUri) + '</style>' +
+    '</head><body>' + sections + '</body></html>';
 }

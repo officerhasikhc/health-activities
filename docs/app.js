@@ -16,6 +16,7 @@ var SUBMITTING = false;
 var PHOTO_VIEW = { ids:[], index:0, title:'' };
 var AR_MONTHS_UI = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 var PENDING_RECORD_FILTER = null;
+var PENDING_FORM_MISSING = null;
 var _lastSessionTouch = 0;
 var IDLE_LIMIT_MS = 10 * 60 * 1000;
 var idleTimer = null;
@@ -310,6 +311,7 @@ function periodControlsHtml(prefix){
       '<optgroup label="شهري">'+monthsHtml+'</optgroup>'+
       '<option value="all">جميع البرامج (كل السنوات)</option>'+
     '</select></div>'+
+    '<div class="period-count-chip hidden" id="'+prefix+'_periodCount" aria-live="polite"></div>'+
     empHtml +
   '</div>';
 }
@@ -363,6 +365,22 @@ function periodFilter(prefix){
   };
 }
 function periodKey(prefix){ return JSON.stringify(periodFilter(prefix)); }
+function periodCountLabel(filter){
+  if(!filter) return 'عدد الفعاليات';
+  if(filter.mode==='month') return AR_MONTHS_UI[(filter.month||1)-1] || 'الشهر';
+  if(filter.mode==='quarter') return 'الربع '+(['','الأول','الثاني','الثالث','الرابع'][filter.quarter]||'');
+  if(filter.mode==='half') return filter.half===1?'النصف الأول':'النصف الثاني';
+  if(filter.mode==='year') return 'سنة '+filter.year;
+  return 'كل السنوات';
+}
+function updatePeriodCountChip(prefix, list){
+  var chip=document.getElementById(prefix+'_periodCount');
+  if(!chip) return;
+  var count=(list||[]).filter(function(o){ return !o._pending; }).length;
+  var filter=periodFilter(prefix);
+  chip.textContent=periodCountLabel(filter)+': '+count+' '+(count===1?'فعالية':'فعاليات')+' · عدد الفعاليات';
+  chip.classList.remove('hidden');
+}
 function dateParts(s){
   var m=String(s||'').match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
   if(m) return { year:parseInt(m[1],10), month:parseInt(m[2],10), day:parseInt(m[3],10) };
@@ -606,6 +624,7 @@ function renderForm(editing){
     var es=document.getElementById('f_exec'); if(es) es.value=FORM.executor_no;
   }
   attachAutosave();
+  applyPendingMissingFields();
 }
 
 function execOptions(){
@@ -779,7 +798,7 @@ function submitForm(){
   SUBMITTING=true;
   btn.disabled=true; btn.textContent='جارٍ الحفظ…';
 
-  if(Outbox.available){
+  if(Outbox.available && !isEdit){
     if(Outbox.setActive) Outbox.setActive(payload,true);
     Outbox.add(payload).then(function(localId){
       clearDraft(); updatePending();
@@ -896,7 +915,7 @@ function renderRecords(){
     '<div class="filters action-filters">'+
       '<div class="field" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="loadRecords(true)">تحديث</button></div>'+
       '<div class="field" style="justify-content:flex-end"><button class="btn btn-excel btn-sm" id="excelBtn" onclick="exportExcel()" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تصدير Excel</button></div>'+
-      '<div class="field" style="justify-content:flex-end"><button class="btn btn-zip btn-sm" id="zipBtn" onclick="exportZip()" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تحميل ZIP</button></div>'+
+      '<div class="field" style="justify-content:flex-end"><button class="btn btn-pdf btn-sm" id="periodPdfBtn" onclick="exportPeriodPdf()" onpointerenter="Warmup.intent(\'export\')" ontouchstart="Warmup.intent(\'export\')">تصدير PDF</button></div>'+
     '</div>'+
     '<div id="recList"><div class="loading"><span class="spin"></span> جارٍ التحميل…</div></div>'+
   '</div>';
@@ -910,6 +929,7 @@ function loadRecords(force){
   var key=filterKey(filter);
   if(REC_CACHE[key]){
     paintRecords(REC_CACHE[key]);
+    updatePeriodCountChip('fl', REC_CACHE[key]);
     Warmup.records(filter);
     if(!force) return;
   } else {
@@ -917,6 +937,7 @@ function loadRecords(force){
   }
   fetchRecordsForFilter(filter, !!force).then(function(merged){
     paintRecords(merged);
+    updatePeriodCountChip('fl', merged);
     Warmup.records(filter);
   }).catch(function(e){
     var box=document.getElementById('recList');
@@ -991,10 +1012,10 @@ function paintRecords(list){
         '</div>'+
       '</div>'+
       '<div class="ops record-actions" aria-label="إجراءات الفعالية">'+
-        '<button class="btn btn-view btn-sm btn-command btn-command-primary" onclick="viewActivity(\''+o.id+'\')"><span class="ico" aria-hidden="true">◉</span><span>عرض</span></button>'+
-        (isPending?'':'<button class="btn btn-edit btn-sm btn-command" onclick="editActivity(\''+o.id+'\')"><span class="ico" aria-hidden="true">✎</span><span>تعديل</span></button>')+
-        (isPending?'':'<button class="btn btn-print btn-sm btn-command" id="pdfBtn_'+escAttr(o.id)+'" onclick="prepareExportPdf(\''+o.id+'\')"><span class="ico" aria-hidden="true">⇩</span><span>PDF</span></button>')+
-        (isPending?'':'<button class="btn btn-danger-text btn-sm btn-command" id="delBtn_'+escAttr(o.id)+'" aria-label="حذف '+escAttr(o.title)+'" onclick="askDelete(\''+o.id+'\')"><span>حذف</span></button>')+
+        '<button class="btn btn-icon-command btn-view" title="عرض" aria-label="عرض '+escAttr(o.title)+'" onclick="viewActivity(\''+o.id+'\')"><span class="ico" aria-hidden="true">👁</span></button>'+
+        (isPending?'':'<button class="btn btn-icon-command btn-edit" title="تعديل" aria-label="تعديل '+escAttr(o.title)+'" onclick="editActivity(\''+o.id+'\')"><span class="ico" aria-hidden="true">✎</span></button>')+
+        (isPending?'':'<button class="btn btn-icon-command btn-print" title="طباعة" aria-label="طباعة '+escAttr(o.title)+'" id="pdfBtn_'+escAttr(o.id)+'" onclick="prepareExportPdf(\''+o.id+'\')"><span class="ico" aria-hidden="true">⎙</span></button>')+
+        (isPending?'':'<button class="btn btn-icon-command btn-danger-text" title="حذف" id="delBtn_'+escAttr(o.id)+'" aria-label="حذف '+escAttr(o.title)+'" onclick="askDelete(\''+o.id+'\')"><span class="ico" aria-hidden="true">⌫</span></button>')+
       '</div></div>';
   }).join('');
 }
@@ -1116,6 +1137,34 @@ function askDelete(id){
   }, true);
 }
 
+function issueFieldId(code){
+  var map={
+    type:'f_type', type_custom:'f_type_custom', title:'f_title',
+    world_day:'f_world', event_date:'f_date',
+    executor_no:USER&&USER.role==='admin'?'f_exec':'whoName',
+    objective:'f_obj', location:'f_loc', beneficiaries:'f_ben',
+    mechanism:'mechChoices', target_groups:'chips', partners:'partInput',
+    photos:'f_photos', notes:'f_notes'
+  };
+  return map[code]||'saveBtn';
+}
+function issuesToMissing(issueCodes){
+  return (issueCodes||[]).map(function(code){
+    return { key:code, id:issueFieldId(code), label:fieldLabel(code) };
+  });
+}
+function editActivityWithIssues(id, issueCodes){
+  PENDING_FORM_MISSING = issuesToMissing(issueCodes);
+  closeModal();
+  editActivity(id);
+}
+function applyPendingMissingFields(){
+  if(!PENDING_FORM_MISSING || !PENDING_FORM_MISSING.length) return;
+  var miss=PENDING_FORM_MISSING.slice();
+  PENDING_FORM_MISSING=null;
+  setTimeout(function(){ showValidationErrors(miss); }, 80);
+}
+
 function readinessIssueListHtml(items, emptyText){
   items = items || [];
   if(!items.length) return '<div class="hint">'+esc(emptyText||'لا توجد ملاحظات.')+'</div>';
@@ -1131,10 +1180,14 @@ function readinessSummaryHtml(readiness){
   readiness = readiness || {};
   if(readiness.items && readiness.items.length){
     return '<div class="readiness-records">'+readiness.items.map(function(item){
+      var issues=(item.blocking||[]).concat(item.warnings||[]);
+      var codes=(item.blocking||[]).map(function(issue){ return issue.code; }).filter(Boolean);
+      var canEdit=item.id && codes.length;
       return '<div class="readiness-record">'+
         '<b>'+esc(item.title||item.id||'فعالية')+'</b>'+
         '<span>'+esc(item.event_date||'')+'</span>'+
-        readinessIssueListHtml((item.blocking||[]).concat(item.warnings||[]), '')+
+        readinessIssueListHtml(issues, '')+
+        (canEdit?'<button class="btn btn-ghost btn-sm" onclick="editActivityWithIssues(\''+escAttr(item.id)+'\', '+escAttr(JSON.stringify(codes))+')">تعديل البيانات</button>':'')+
       '</div>';
     }).join('')+
     (readiness.truncated?'<div class="hint">تم عرض أول 30 فعالية تحتاج مراجعة.</div>':'')+
@@ -1148,10 +1201,14 @@ function showReadinessModal(title, readiness, onProceed){
   var hasBlocking = (readiness.blocking && readiness.blocking.length) || readiness.blockingCount > 0;
   var hasWarnings = (readiness.warnings && readiness.warnings.length) || readiness.warningCount > 0;
   var intro = hasBlocking
-    ? 'توجد نواقص تمنع التقرير من الظهور كمكتمل. راجعها قبل التصدير.'
+    ? 'هناك بيانات ناقصة'
     : 'توجد ملاحظات غير مانعة. يمكنك المتابعة إذا كانت مقبولة.';
   var body = '<p class="readiness-intro">'+esc(intro)+'</p>'+readinessSummaryHtml(readiness);
   var footer = '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>';
+  if(hasBlocking && readiness.recordId){
+    var codes=(readiness.blocking||[]).map(function(issue){ return issue.code; }).filter(Boolean);
+    footer += '<button class="btn btn-primary" onclick="editActivityWithIssues(\''+escAttr(readiness.recordId)+'\', '+escAttr(JSON.stringify(codes))+')">تعديل البيانات</button>';
+  }
   if(!hasBlocking && hasWarnings){
     window._readinessProceed = function(){ closeModal(); onProceed(); };
     footer += '<button class="btn btn-primary" onclick="window._readinessProceed()">تصدير رغم الملاحظات</button>';
@@ -1177,6 +1234,7 @@ function prepareExportPdf(id){
   run('getActivityReportReadiness', id, USER.no).then(function(r){
     restoreBusy(btn);
     if(!r || !r.ok){ toast((r&&r.msg)||'تعذّر فحص جاهزية التقرير.','err'); return; }
+    r.readiness.recordId = id;
     var proceed=function(){ exportPdfDirect(id); };
     if(shouldProceedAfterReadiness(r.readiness, proceed, 'جاهزية تقرير PDF')) return proceed();
   }).catch(function(e){
@@ -1226,152 +1284,31 @@ function exportExcelDirect(filter){
   });
 }
 
-function exportZip(){
-  var btn=document.getElementById('zipBtn');
+function exportPeriodPdf(){
+  var btn=document.getElementById('periodPdfBtn');
   var filter=periodFilter('fl');
   setBusy(btn, 'جارٍ فحص البيانات…');
   run('getPeriodReportReadiness', filter, USER.no).then(function(r){
     restoreBusy(btn);
     if(!r || !r.ok){ toast((r&&r.msg)||'تعذّر فحص جاهزية التصدير.','err'); return; }
-    var proceed=function(){ exportZipDirect(filter); };
-    if(shouldProceedAfterReadiness(r.readiness, proceed, 'جاهزية تحميل ZIP')) return proceed();
+    var proceed=function(){ exportPeriodPdfDirect(filter); };
+    if(shouldProceedAfterReadiness(r.readiness, proceed, 'جاهزية تصدير PDF')) return proceed();
   }).catch(function(e){
     restoreBusy(btn);
     toast((e&&e.message)||'تعذّر فحص جاهزية التصدير.','err');
   });
 }
 
-function exportZipDirect(filter){
-  var btn=document.getElementById('zipBtn');
-  filter=filter || periodFilter('fl');
-
-  if(typeof JSZip === 'undefined'){
-    var quickCached=REC_CACHE[filterKey(filter)];
-    var label=(quickCached&&quickCached.length?'تجهيز '+quickCached.length+' ملفات…':'جارٍ تجهيز الملفات…');
-    setBusy(btn, label);
-    var options = { scope:'filter' };
-    run('exportActivitiesZipDownload', filter, USER.no, options).then(function(r){
-      restoreBusy(btn);
-      if(r&&r.ok) handleDownloadResponse(r, 'ZIP');
-      else toast((r&&r.msg)||'تعذّر إنشاء ZIP.','err');
-    }).catch(function(e){
-      restoreBusy(btn);
-      toast((e&&e.message)||'تعذّر إنشاء ZIP.','err');
-    });
-    return;
-  }
-
-  // انتظر جلب البيانات أولاً إن لم تكن في الكاش
-  setBusy(btn, 'جارٍ تجهيز الملفات…');
-  fetchRecordsForFilter(filter, false).then(function(cached){
-    if(!cached || !cached.length){
-      restoreBusy(btn);
-      toast('لا توجد فعاليات مسجّلة في هذه الفترة لتصديرها.','err');
-      return;
-    }
+function exportPeriodPdfDirect(filter){
+  var btn=document.getElementById('periodPdfBtn');
+  setBusy(btn, 'جارٍ إنشاء PDF…');
+  run('exportActivitiesPdfDownload', filter || periodFilter('fl'), USER.no).then(function(r){
     restoreBusy(btn);
-
-    var total = cached.length;
-    var zip = new JSZip();
-    var folderName = 'فعاليات_أثر';
-    if(filter.mode === 'month') folderName += '_' + filter.year + '_شهر_' + filter.month;
-    else if(filter.mode === 'quarter') folderName += '_' + filter.year + '_ربع_' + filter.quarter;
-    else if(filter.mode === 'half') folderName += '_' + filter.year + '_نصف_' + filter.half;
-    else if(filter.mode === 'year') folderName += '_' + filter.year;
-    
-    var folder = zip.folder(folderName);
-    var currentIdx = 0;
-    var errorCount = 0;
-    
-    var progressHtml = '<div style="text-align:center;padding:8px 0;">' +
-      '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;">' +
-        '<span class="spin" style="flex:0 0 auto"></span>' +
-        '<span id="zipProgressText" style="font-weight:600;font-size:14px;color:var(--brand-deep)">0 / ' + total + '</span>' +
-      '</div>' +
-      '<div style="background:#e8edf0;border-radius:4px;height:6px;margin:0 0 8px;overflow:hidden;">' +
-        '<div id="zipProgressBar" style="background:var(--brand);height:100%;width:0%;transition:width 0.3s ease;border-radius:4px;"></div>' +
-      '</div>' +
-      '<div id="zipCurrentFile" class="hint" style="font-size:12px;height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">جارٍ بدء التحميل…</div>' +
-    '</div>';
-    
-    openModal('تصدير ZIP', progressHtml, '<button id="zipCancelBtn" class="btn btn-ghost" onclick="window._cancelZip=true; closeModal()">إلغاء</button>');
-    window._cancelZip = false;
-    
-    function processNext(){
-      if(window._cancelZip) {
-        toast('تم إلغاء التنزيل.','ok');
-        return;
-      }
-      if(currentIdx >= total){
-        var pText = document.getElementById('zipProgressText');
-        var cFile = document.getElementById('zipCurrentFile');
-        if(pText) pText.innerText = 'جارٍ الضغط…';
-        if(cFile) cFile.innerText = '';
-        var cancelBtn = document.getElementById('zipCancelBtn');
-        if(cancelBtn) cancelBtn.style.display = 'none';
-        
-        zip.generateAsync({type:"blob"}).then(function(content) {
-          if(window._cancelZip) return;
-          closeModal();
-          triggerBlobDownload(content, folderName + ".zip");
-          if(errorCount > 0){
-            toast('تم التحميل مع ' + errorCount + ' خطأ.','err');
-          } else {
-            toast('تم تحميل جميع الفعاليات.','ok');
-          }
-        }).catch(function(e){
-          closeModal();
-          toast('تعذّر ضغط الملفات.','err');
-        });
-        return;
-      }
-      
-      // تشغيل طلبين بالتوازي
-      var batch = [];
-      var batchSize = Math.min(2, total - currentIdx);
-      for(var b=0; b<batchSize; b++){
-        batch.push(currentIdx + b);
-      }
-      
-      var batchDone = 0;
-      batch.forEach(function(idx){
-        var rec = cached[idx];
-        var title = String(rec.title || 'بدون عنوان');
-        
-        run('exportActivityPdfDownload', rec.id, USER.no).then(function(r){
-          if(window._cancelZip) return;
-          if(r && r.ok && r.base64 && r.delivery === 'inline'){
-            folder.file((r.fileName || r.name || (title+'.pdf')), r.base64, {base64: true});
-          } else {
-            errorCount++;
-          }
-          batchDone++;
-          if(batchDone >= batch.length){
-            currentIdx += batch.length;
-            var progEl = document.getElementById('zipProgressBar');
-            var textEl = document.getElementById('zipProgressText');
-            var fileEl = document.getElementById('zipCurrentFile');
-            if(progEl) progEl.style.width = Math.round((currentIdx / total) * 100) + '%';
-            if(textEl) textEl.innerText = currentIdx + ' / ' + total;
-            if(fileEl && cached[currentIdx]) fileEl.innerText = String(cached[currentIdx].title || '');
-            processNext();
-          }
-        }).catch(function(e){
-          if(window._cancelZip) return;
-          errorCount++;
-          batchDone++;
-          if(batchDone >= batch.length){
-            currentIdx += batch.length;
-            processNext();
-          }
-        });
-      });
-    }
-    
-    processNext();
+    if(r&&r.ok) handleDownloadResponse(r, 'PDF');
+    else toast((r&&r.msg)||'تعذّر إنشاء PDF.','err');
   }).catch(function(e){
     restoreBusy(btn);
-    toast('تعذّر جلب البيانات: '+(e&&e.message||'خطأ غير معروف'),'err');
+    toast((e&&e.message)||'تعذّر إنشاء PDF.','err');
   });
 }
 function setBusy(btn, text){
