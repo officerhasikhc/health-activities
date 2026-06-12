@@ -103,3 +103,43 @@ test('period readiness summarizes row issues', () => {
   assert.equal(summary.issueCounts.photos, 1);
   assert.equal(summary.issueCounts.uploading, 1);
 });
+
+test('combined period PDF API is exposed to bridge callers', () => {
+  const ctx = loadCodeGs();
+  assert.equal(ctx.API_METHODS.exportActivitiesPdfDownload, true);
+  assert.equal(typeof ctx.exportActivitiesPdfDownload, 'function');
+});
+
+test('combined period PDF HTML includes each activity as an independent report section', () => {
+  const ctx = loadCodeGs();
+  assert.equal(typeof ctx.buildActivitiesPeriodPdfHtml_, 'function');
+
+  const html = ctx.buildActivitiesPeriodPdfHtml_([
+    {
+      type: 'محاضرة',
+      title: 'النشاط الأول',
+      event_date: '2026-06-01',
+      month_name: 'يونيو',
+      quarter: 'الربع الثاني',
+      executor_name: 'آمنة',
+      objective: 'رفع الوعي',
+      photo_ids: ''
+    },
+    {
+      type: 'يوم عالمي',
+      world_day: 'اليوم العالمي للصحة',
+      title: 'اليوم العالمي للصحة',
+      event_date: '2026-06-02',
+      month_name: 'يونيو',
+      quarter: 'الربع الثاني',
+      executor_name: 'عائشة',
+      objective: 'تفعيل المناسبة',
+      photo_ids: ''
+    }
+  ], '', {});
+
+  assert.match(html, /تقرير توثيق فعالية/);
+  assert.match(html, /النشاط الأول/);
+  assert.match(html, /اليوم العالمي للصحة/);
+  assert.match(html, /period-break/);
+});

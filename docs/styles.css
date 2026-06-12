@@ -179,6 +179,8 @@
   .btn-view:hover{background:#e3ebee}
   .btn-excel{background:#e8f3ed;color:#1e6b48;border:1px solid #bcd9ca}
   .btn-excel:hover{background:#dceee5}
+  .btn-pdf{background:#fff;color:var(--brand-deep);border:1px solid var(--line-strong)}
+  .btn-pdf:hover{background:#f4f6f7;border-color:#b4c2ce}
   .btn-zip{background:#edf2f6;color:#31546b;border:1px solid #c8d7e1}
   .btn-zip:hover{background:#e1ebf1}
   .btn-danger-outline{background:#fff;color:var(--err);border:1px solid rgba(178,59,59,.45)}
@@ -186,6 +188,10 @@
   .btn-command{min-width:78px;height:34px;padding:7px 12px;border-radius:7px}
   .btn-command-primary{background:var(--brand);border-color:var(--brand);color:#fff}
   .btn-command-primary:hover{background:var(--brand-deep)}
+  .btn-icon-command{width:34px;height:34px;min-width:34px;padding:0;border-radius:6px;background:#fff;color:var(--brand-deep);border:1px solid var(--line-strong)}
+  .btn-icon-command:hover{background:#f4f6f7;border-color:#b4c2ce;box-shadow:none}
+  .btn-icon-command.btn-danger-text{color:var(--err);border-color:rgba(178,59,59,.22)}
+  .btn-icon-command.btn-danger-text:hover{background:#fff6f6;border-color:rgba(178,59,59,.38)}
   .btn-danger-text{background:transparent;color:var(--err);border:1px solid transparent}
   .btn-danger-text:hover{background:#fff4f4;border-color:rgba(178,59,59,.25);box-shadow:none}
   .ico{font-size:15px;line-height:1}
@@ -197,6 +203,8 @@
   .filters{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:14px}
   .filters .field{min-width:130px}
   .period-filters{margin-bottom:8px}
+  .period-count-chip{align-self:flex-end;min-height:34px;display:inline-flex;align-items:center;border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 12px;color:var(--brand-deep);font-size:12.5px;font-weight:700}
+  .period-count-chip.hidden{display:none}
   .action-filters{margin-top:-4px}
   .rec{border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px;
     background:#fff;display:flex;gap:18px;align-items:flex-start;
