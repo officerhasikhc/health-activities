@@ -8,6 +8,7 @@
 var USER_HEADERS = ['emp_no','name','role','title','active',
   'password_hash','salt','must_reset','pwd_updated_at'];
 var PWD_ITERATIONS = 4000;
+var PWD_ITERATIONS_LEGACY = 12000;
 var PWD_MIN_LEN = 6;
 var LOGIN_MAX_FAILS = 5;
 var LOGIN_LOCK_SECONDS = 900;
@@ -26,10 +27,11 @@ function genSalt_() {
   return Utilities.base64EncodeWebSafe(Utilities.getUuid() + Utilities.getUuid()).slice(0, 24);
 }
 
-function hashPassword_(password, salt) {
+function hashPassword_(password, salt, iters) {
+  var n = iters || PWD_ITERATIONS;
   var seed = String(salt) + '|' + pepper_() + '|' + String(password);
   var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, seed, Utilities.Charset.UTF_8);
-  for (var i = 1; i < PWD_ITERATIONS; i++) {
+  for (var i = 1; i < n; i++) {
     bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes);
   }
   return Utilities.base64Encode(bytes);
@@ -47,7 +49,37 @@ function constantTimeEq_(a, b) {
 function verifyPassword_(user, password) {
   if (!user.password_hash) return String(password) === String(user.emp_no);
   if (!user.salt) return false;
-  return constantTimeEq_(hashPassword_(password, user.salt), String(user.password_hash));
+  var stored = String(user.password_hash);
+  if (constantTimeEq_(hashPassword_(password, user.salt, PWD_ITERATIONS), stored)) return true;
+  if (constantTimeEq_(hashPassword_(password, user.salt, PWD_ITERATIONS_LEGACY), stored)) {
+    try { rehashUserPassword_(user, password); } catch (e) {}
+    return true;
+  }
+  return false;
+}
+
+function rehashUserPassword_(user, password) {
+  var sh = ss_().getSheetByName(SHEETS.USERS);
+  if (!sh) return;
+  ensureSheetHeaders_(sh, USER_HEADERS);
+  var data = sh.getDataRange().getValues();
+  var head = data.shift();
+  var iNo = head.indexOf('emp_no');
+  var iHash = head.indexOf('password_hash');
+  var iSalt = head.indexOf('salt');
+  var iUpd = head.indexOf('pwd_updated_at');
+  if (iNo < 0 || iHash < 0 || iSalt < 0) return;
+  for (var r = 0; r < data.length; r++) {
+    if (String(data[r][iNo]) === String(user.emp_no)) {
+      var newSalt = genSalt_();
+      var newHash = hashPassword_(password, newSalt, PWD_ITERATIONS);
+      sh.getRange(r + 2, iHash + 1).setValue(newHash);
+      sh.getRange(r + 2, iSalt + 1).setValue(newSalt);
+      if (iUpd >= 0) sh.getRange(r + 2, iUpd + 1).setValue(new Date());
+      CACHE.remove('users');
+      return;
+    }
+  }
 }
 
 function failKey_(empNo) { return 'loginfail_' + empNo; }
