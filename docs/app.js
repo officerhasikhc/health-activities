@@ -71,30 +71,6 @@ function setButtonBusy(btn, on, busyText){
   btn.disabled=!!on;
   btn.textContent=on ? busyText : btn.getAttribute('data-idle-text');
 }
-function storeCredential(no, password, name){
-  try{
-    if(navigator.credentials && window.PasswordCredential){
-      return navigator.credentials.store(new PasswordCredential({
-        id:String(no), password:String(password), name:name || ''
-      })).catch(function(){});
-    }
-  }catch(e){}
-  return Promise.resolve();
-}
-function prefillCredential(){
-  try{
-    if(!(navigator.credentials && window.PasswordCredential)) return;
-    navigator.credentials.get({ password:true, mediation:'optional' }).then(function(cred){
-      if(!cred) return;
-      var emp=document.getElementById('empNo');
-      var pw=document.getElementById('pw');
-      var remember=document.getElementById('rememberEmp');
-      if(emp && !emp.value) emp.value=cred.id || '';
-      if(pw && cred.password && !pw.value) pw.value=cred.password;
-      if(remember && cred.id) remember.checked=true;
-    }).catch(function(){});
-  }catch(e){}
-}
 function wireAuthUx(){
   if(_authUxReady) return;
   _authUxReady = true;
@@ -115,11 +91,10 @@ function wireAuthUx(){
     });
   }
 }
-function finishLogin(no, password, r){
+function finishLogin(no, r){
   USER=r.user; CONFIG=r.config;
   saveRememberedEmp(no);
   persistSession(no);
-  storeCredential(no, password, USER && USER.name);
   enterApp();
   boot();
 }
@@ -143,7 +118,12 @@ function doLogin(ev){
       if(next) next.focus();
       return;
     }
-    finishLogin(no, pass, r);
+    if(r.mustReset !== false || !r.config){
+      clearSession();
+      setAuthError('loginErr','تعذّر إكمال الدخول لأن الخادم لم يفعّل تغيير كلمة المرور بعد. أعد نشر تطبيق الويب ثم حاول مجددًا.');
+      return;
+    }
+    finishLogin(no, r);
   }).catch(function(e){
     setAuthError('loginErr',(e && e.message) ? e.message : 'تعذّر الاتصال، أعد المحاولة.');
   }).finally(function(){
@@ -158,7 +138,7 @@ function doChangePassword(ev){
   var btn=document.getElementById('resetBtn');
   setAuthError('resetErr','');
   if(p1 !== p2){ setAuthError('resetErr','كلمتا المرور غير متطابقتين.'); return; }
-  if(p1.length < 8){ setAuthError('resetErr','كلمة المرور يجب ألا تقل عن ٨ أحرف.'); return; }
+  if(p1.length < 6){ setAuthError('resetErr','كلمة المرور يجب ألا تقل عن ٦ أحرف.'); return; }
   if(/\s/.test(p1)){ setAuthError('resetErr','لا تستخدم مسافات في كلمة المرور.'); return; }
   if(!/[A-Za-z\u0600-\u06FF]/.test(p1) || !/[0-9]/.test(p1)){
     setAuthError('resetErr','كلمة المرور يجب أن تحتوي على حرف ورقم.');
@@ -173,8 +153,12 @@ function doChangePassword(ev){
   }).then(function(full){
     if(!full) return;
     if(!full.ok){ setAuthError('resetErr',full.msg || 'تعذّر الدخول بعد تغيير كلمة المرور.'); return; }
+    if(full.mustReset !== false || !full.config){
+      setAuthError('resetErr','تم تغيير كلمة المرور، لكن الخادم لم يرجع تهيئة كاملة. أعد تحميل الصفحة وسجّل الدخول بكلمة المرور الجديدة.');
+      return;
+    }
     document.getElementById('resetScreen').classList.add('hidden');
-    finishLogin(no, p1, full);
+    finishLogin(no, full);
   }).catch(function(e){
     setAuthError('resetErr',(e && e.message) ? e.message : 'تعذّر الاتصال، أعد المحاولة.');
   }).finally(function(){
@@ -198,7 +182,7 @@ function forceLogout(message){
 function persistSession(no){
   try{
     localStorage.setItem(SESSION_KEY, JSON.stringify({
-      authVersion: 2, no: no || (USER && USER.no), user: USER, config: CONFIG, ts: Date.now()
+      authVersion: 3, no: no || (USER && USER.no), user: USER, config: CONFIG, ts: Date.now()
     }));
     _lastSessionTouch = Date.now();
   }catch(e){}
@@ -226,7 +210,7 @@ function restoreSession(){
   var s;
   try{ s = JSON.parse(raw); }catch(e){ clearSession(); return false; }
   if(!s || !s.user || !s.config){ clearSession(); return false; }
-  if(s.authVersion !== 2){ clearSession(); return false; }
+  if(s.authVersion !== 3){ clearSession(); return false; }
   if(Date.now() - (s.ts||0) > IDLE_LIMIT_MS){ clearSession(); return false; }
   USER = s.user; CONFIG = s.config;
   enterApp();
@@ -276,7 +260,6 @@ function resetIdleTimer(){
 function bootstrapAuth(){
   wireAuthUx();
   initLoginPrefs();
-  prefillCredential();
   restoreSession();
 }
 document.addEventListener('DOMContentLoaded', bootstrapAuth);

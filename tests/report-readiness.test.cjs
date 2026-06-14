@@ -88,6 +88,15 @@ test('password auth rejects wrong default password and requires reset on first l
   assert.equal(init.config, undefined);
 });
 
+test('password strength accepts six characters with letters and numbers', () => {
+  const ctx = loadCodeGs();
+  assert.equal(ctx.passwordStrengthError_('abc123', '65886'), '');
+  assert.equal(ctx.passwordStrengthError_('ab#123', '65886'), '');
+  assert.match(ctx.passwordStrengthError_('abc12', '65886'), /6/);
+  assert.match(ctx.passwordStrengthError_('abcdef', '65886'), /رقم/);
+  assert.match(ctx.passwordStrengthError_('123456', '65886'), /حرف/);
+});
+
 test('activity readiness accepts existing Drive photos', () => {
   const ctx = loadCodeGs();
   const readiness = ctx.reportReadinessForActivity_({

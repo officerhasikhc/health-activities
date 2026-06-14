@@ -19,26 +19,29 @@ test('toast containers are accessible live regions in both entrypoints', () => {
 test('login screens use password-manager friendly forms in both entrypoints', () => {
   for (const file of ['docs/index.html', 'src/Index.html']) {
     const html = read(file);
-    assert.match(html, /<form[^>]*id="loginForm"[^>]*autocomplete="on"[^>]*onsubmit="doLogin\(event\); return false;"/, file);
+    assert.match(html, /<form[^>]*id="loginForm"[^>]*autocomplete="off"[^>]*onsubmit="doLogin\(event\); return false;"/, file);
     assert.match(html, /id="empNo"[^>]*name="username"[^>]*autocomplete="username"/, file);
-    assert.match(html, /id="pw"[^>]*name="password"[^>]*type="password"[^>]*autocomplete="current-password"/, file);
+    assert.match(html, /id="pw"[^>]*name="password"[^>]*type="password"[^>]*autocomplete="off"/, file);
     assert.match(html, /class="pw-toggle"[^>]*data-for="pw"/, file);
     assert.match(html, /id="capsHint"/, file);
     assert.match(html, /id="resetScreen"[^>]*class="login-wrap hidden"/, file);
-    assert.match(html, /id="resetForm"[^>]*autocomplete="on"[^>]*onsubmit="doChangePassword\(event\); return false;"/, file);
+    assert.match(html, /id="resetForm"[^>]*autocomplete="off"[^>]*onsubmit="doChangePassword\(event\); return false;"/, file);
     assert.match(html, /id="newPw"[^>]*autocomplete="new-password"/, file);
     assert.match(html, /id="newPw2"[^>]*autocomplete="new-password"/, file);
     assert.match(html, /install-btn"[^>]*type="button"/, file);
   }
 });
 
-test('auth client uses password init and does not refresh sessions without a password', () => {
+test('auth client uses system-controlled password reset and fails closed on old auth responses', () => {
   for (const file of ['docs/app.js', 'src/JavaScript.html']) {
     const js = read(file);
     assert.match(js, /function doChangePassword\(ev\)/, file);
     assert.match(js, /run\('init',\s*no,\s*pass\)/, file);
     assert.match(js, /run\('changePassword',\s*\[?no/, file);
-    assert.match(js, /navigator\.credentials\.store/, file);
+    assert.match(js, /r\.mustReset !== false/, file);
+    assert.match(js, /authVersion:\s*3/, file);
+    assert.doesNotMatch(js, /PasswordCredential/, file);
+    assert.doesNotMatch(js, /navigator\.credentials/, file);
     assert.doesNotMatch(js, /run\('init',\s*s\.no\)/, file);
   }
 });
