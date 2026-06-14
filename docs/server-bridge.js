@@ -12,6 +12,9 @@
   var execUrl = window.ATHAR_EXEC_URL ||
     (bridgeUrl ? bridgeUrl.replace(/([?&])bridge=1(&|$)/, '$1').replace(/[?&]$/, '') : '');
   var fetchBroken = false;  // إن فشل fetch مرة (CORS مثلًا) ننتقل للجسر مباشرة
+  var fetchProven = false;  // أوّل fetch نجح؟ بعدها نمنح مهلة أطول
+  var FETCH_PROBE_MS = 3500;
+  var FETCH_FULL_MS = 60000;
   var bridgeFrame = null;
   var bridgeWindow = null;
   var bridgeOrigin = null;
@@ -120,8 +123,9 @@
   function fetchCall(fn, args){
     if (!execUrl) return Promise.reject(new Error('لا يوجد رابط /exec'));
     var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    var timer = setTimeout(function(){ if (controller) controller.abort(); }, 300000);
-    log('fetch ->', fn);
+    var budget = fetchProven ? FETCH_FULL_MS : FETCH_PROBE_MS;
+    var timer = setTimeout(function(){ if (controller) controller.abort(); }, budget);
+    log('fetch ->', fn, '(budget=' + budget + 'ms)');
     return fetch(execUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -131,6 +135,7 @@
       signal: controller ? controller.signal : undefined
     }).then(function(res){
       clearTimeout(timer);
+      fetchProven = true;
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.text();
     }).then(function(text){

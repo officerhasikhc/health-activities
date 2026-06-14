@@ -545,37 +545,29 @@ function fetchDashboardForFilter(filter, force){
   });
   return DASH_PENDING[key];
 }
-function warmRecordFilters(seed){
-  var f=clonePeriod(seed), list=[f];
-  if(f.mode==='month'){
-    list.push(shiftedMonthFilter(f,-1), shiftedMonthFilter(f,1));
-    list.push({mode:'quarter',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
-    list.push({mode:'half',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
-  } else if(f.mode==='quarter' || f.mode==='half'){
-    list.push({mode:'month',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
-    list.push({mode:'year',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
-  }
-  list.forEach(function(x){ fetchRecordsForFilter(x, false).catch(function(){}); });
-}
-function warmDashboardFilters(seed){
-  var f=clonePeriod(seed), list=[f];
-  if(f.mode==='month') list.push({mode:'quarter',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
-  if(f.mode==='quarter' || f.mode==='half') list.push({mode:'year',year:f.year,month:f.month,quarter:f.quarter,half:f.half});
-  list.forEach(function(x){ fetchDashboardForFilter(x, false).catch(function(){}); });
-}
+var WARMUP_INTENT_GAP = 600;
+var _warmIntentAt = {};
 var Warmup = {
   afterLogin:function(){
     if(!USER) return;
     idleWork(function(){
       var f=Object.assign({mode:'month'}, currentPeriod());
       fetchRecordsForFilter(f, false).catch(function(){});
-      fetchDashboardForFilter(f, false).catch(function(){});
     });
   },
-  records:function(filter){ if(USER) idleWork(function(){ warmRecordFilters(filter||periodFilter('fl')); }); },
-  dashboard:function(filter){ if(USER) idleWork(function(){ warmDashboardFilters(filter||periodFilter('dash')); }); },
+  records:function(filter){
+    if(!USER) return;
+    idleWork(function(){ fetchRecordsForFilter(filter||periodFilter('fl'), false).catch(function(){}); });
+  },
+  dashboard:function(filter){
+    if(!USER) return;
+    idleWork(function(){ fetchDashboardForFilter(filter||periodFilter('dash'), false).catch(function(){}); });
+  },
   intent:function(area){
     if(!USER) return;
+    var now=Date.now();
+    if(_warmIntentAt[area] && (now-_warmIntentAt[area])<WARMUP_INTENT_GAP) return;
+    _warmIntentAt[area]=now;
     if(area==='records' || area==='export') this.records();
     else if(area==='dashboard') this.dashboard();
   }
