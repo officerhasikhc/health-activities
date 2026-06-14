@@ -58,30 +58,130 @@ function toast(msg, type, detail){
   toastT=setTimeout(function(){ t.className=''; }, detail?4200:3200);
 }
 
-/* ====================== الدخول (استدعاء واحد) ====================== */
-function doLogin(){
+/* ====================== الدخول وكلمة المرور ====================== */
+var _pendingPassword = '';
+var _authUxReady = false;
+
+function setAuthError(id, msg){
+  var el=document.getElementById(id);
+  if(el) el.textContent=msg || '';
+}
+function setButtonBusy(btn, on, busyText){
+  if(!btn) return;
+  if(!btn.getAttribute('data-idle-text')) btn.setAttribute('data-idle-text', btn.textContent);
+  btn.disabled=!!on;
+  btn.textContent=on ? busyText : btn.getAttribute('data-idle-text');
+}
+function storeCredential(no, password, name){
+  try{
+    if(navigator.credentials && window.PasswordCredential){
+      return navigator.credentials.store(new PasswordCredential({
+        id:String(no), password:String(password), name:name || ''
+      })).catch(function(){});
+    }
+  }catch(e){}
+  return Promise.resolve();
+}
+function prefillCredential(){
+  try{
+    if(!(navigator.credentials && window.PasswordCredential)) return;
+    navigator.credentials.get({ password:true, mediation:'optional' }).then(function(cred){
+      if(!cred) return;
+      var emp=document.getElementById('empNo');
+      var pw=document.getElementById('pw');
+      var remember=document.getElementById('rememberEmp');
+      if(emp && !emp.value) emp.value=cred.id || '';
+      if(pw && cred.password && !pw.value) pw.value=cred.password;
+      if(remember && cred.id) remember.checked=true;
+    }).catch(function(){});
+  }catch(e){}
+}
+function wireAuthUx(){
+  if(_authUxReady) return;
+  _authUxReady = true;
+  Array.prototype.forEach.call(document.querySelectorAll('.pw-toggle'), function(btn){
+    btn.addEventListener('click', function(){
+      var field=document.getElementById(btn.getAttribute('data-for'));
+      if(!field) return;
+      var show=field.type==='password';
+      field.type=show ? 'text' : 'password';
+      btn.textContent=show ? 'إخفاء' : 'إظهار';
+    });
+  });
+  var pw=document.getElementById('pw');
+  var caps=document.getElementById('capsHint');
+  if(pw && caps){
+    pw.addEventListener('keyup', function(e){
+      caps.textContent=(e.getModifierState && e.getModifierState('CapsLock')) ? 'مفتاح Caps Lock مُفعّل' : '';
+    });
+  }
+}
+function finishLogin(no, password, r){
+  USER=r.user; CONFIG=r.config;
+  saveRememberedEmp(no);
+  persistSession(no);
+  storeCredential(no, password, USER && USER.name);
+  enterApp();
+  boot();
+}
+function doLogin(ev){
+  if(ev && ev.preventDefault) ev.preventDefault();
   var no=document.getElementById('empNo').value.trim();
+  var pw=document.getElementById('pw');
+  var pass=pw ? pw.value : '';
   var btn=document.getElementById('loginBtn');
-  var err=document.getElementById('loginErr');
-  err.textContent='';
-  if(!no){ err.textContent='أدخل الرقم الوظيفي.'; return; }
-  btn.disabled=true; btn.textContent='جارٍ التحقق…';
-  run('init',no).then(function(r){
-    btn.disabled=false; btn.textContent='دخول';
-    if(!r.ok){ err.textContent=r.msg; return; }
-    USER=r.user; CONFIG=r.config;
-    saveRememberedEmp(no);
-    persistSession(no);
-    enterApp();
-    boot();
+  setAuthError('loginErr','');
+  if(!no || !pass){ setAuthError('loginErr','أدخل الرقم الوظيفي وكلمة المرور.'); return; }
+  setButtonBusy(btn,true,'جارٍ التحقق…');
+  run('init', no, pass).then(function(r){
+    if(!r || !r.ok){ setAuthError('loginErr',(r && r.msg) || 'تعذّر الدخول.'); return; }
+    if(r.mustReset){
+      USER=r.user; CONFIG=null; _pendingPassword=pass;
+      document.getElementById('resetUser').value=no;
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('resetScreen').classList.remove('hidden');
+      var next=document.getElementById('newPw');
+      if(next) next.focus();
+      return;
+    }
+    finishLogin(no, pass, r);
   }).catch(function(e){
-    btn.disabled=false; btn.textContent='دخول';
-    err.textContent=(e && e.message) ? e.message : 'تعذّر الاتصال، أعد المحاولة.';
+    setAuthError('loginErr',(e && e.message) ? e.message : 'تعذّر الاتصال، أعد المحاولة.');
+  }).finally(function(){
+    setButtonBusy(btn,false,'');
   });
 }
-document.addEventListener('keydown',function(e){
-  if(e.key==='Enter' && !document.getElementById('loginScreen').classList.contains('hidden')) doLogin();
-});
+function doChangePassword(ev){
+  if(ev && ev.preventDefault) ev.preventDefault();
+  var no=document.getElementById('resetUser').value;
+  var p1=document.getElementById('newPw').value || '';
+  var p2=document.getElementById('newPw2').value || '';
+  var btn=document.getElementById('resetBtn');
+  setAuthError('resetErr','');
+  if(p1 !== p2){ setAuthError('resetErr','كلمتا المرور غير متطابقتين.'); return; }
+  if(p1.length < 8){ setAuthError('resetErr','كلمة المرور يجب ألا تقل عن ٨ أحرف.'); return; }
+  if(/\s/.test(p1)){ setAuthError('resetErr','لا تستخدم مسافات في كلمة المرور.'); return; }
+  if(!/[A-Za-z\u0600-\u06FF]/.test(p1) || !/[0-9]/.test(p1)){
+    setAuthError('resetErr','كلمة المرور يجب أن تحتوي على حرف ورقم.');
+    return;
+  }
+  if(String(p1) === String(no)){ setAuthError('resetErr','لا يمكن أن تكون كلمة المرور هي الرقم الوظيفي.'); return; }
+  setButtonBusy(btn,true,'جارٍ الحفظ…');
+  run('changePassword', no, _pendingPassword, p1).then(function(r){
+    if(!r || !r.ok){ setAuthError('resetErr',(r && r.msg) || 'تعذّر تغيير كلمة المرور.'); return null; }
+    _pendingPassword='';
+    return run('init', no, p1);
+  }).then(function(full){
+    if(!full) return;
+    if(!full.ok){ setAuthError('resetErr',full.msg || 'تعذّر الدخول بعد تغيير كلمة المرور.'); return; }
+    document.getElementById('resetScreen').classList.add('hidden');
+    finishLogin(no, p1, full);
+  }).catch(function(e){
+    setAuthError('resetErr',(e && e.message) ? e.message : 'تعذّر الاتصال، أعد المحاولة.');
+  }).finally(function(){
+    setButtonBusy(btn,false,'');
+  });
+}
 function logout(){
   confirmModal('تأكيد الخروج','هل تريد تسجيل الخروج من منصة أثر؟',function(){
     forceLogout('');
@@ -99,7 +199,7 @@ function forceLogout(message){
 function persistSession(no){
   try{
     localStorage.setItem(SESSION_KEY, JSON.stringify({
-      no: no || (USER && USER.no), user: USER, config: CONFIG, ts: Date.now()
+      authVersion: 2, no: no || (USER && USER.no), user: USER, config: CONFIG, ts: Date.now()
     }));
     _lastSessionTouch = Date.now();
   }catch(e){}
@@ -113,6 +213,8 @@ function touchSession(){
 function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
 function enterApp(){
   document.getElementById('loginScreen').classList.add('hidden');
+  var reset=document.getElementById('resetScreen');
+  if(reset) reset.classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('whoName').textContent=USER.name;
   document.getElementById('whoTitle').textContent=USER.title;
@@ -125,17 +227,11 @@ function restoreSession(){
   var s;
   try{ s = JSON.parse(raw); }catch(e){ clearSession(); return false; }
   if(!s || !s.user || !s.config){ clearSession(); return false; }
+  if(s.authVersion !== 2){ clearSession(); return false; }
   if(Date.now() - (s.ts||0) > IDLE_LIMIT_MS){ clearSession(); return false; }
   USER = s.user; CONFIG = s.config;
   enterApp();
   boot();
-  // تحديث القوائم/الصلاحيات في الخلفية دون مقاطعة المستخدم
-  if(s.no){
-    run('init', s.no).then(function(r){
-      if(r && r.ok){ USER=r.user; CONFIG=r.config; persistSession(s.no); }
-      else { forceLogout('انتهت الجلسة. سجّل الدخول من جديد.'); }
-    }).catch(function(){});
-  }
   return true;
 }
 function initLoginPrefs(){
@@ -179,7 +275,9 @@ function resetIdleTimer(){
   }, IDLE_LIMIT_MS);
 }
 function bootstrapAuth(){
+  wireAuthUx();
   initLoginPrefs();
+  prefillCredential();
   restoreSession();
 }
 document.addEventListener('DOMContentLoaded', bootstrapAuth);

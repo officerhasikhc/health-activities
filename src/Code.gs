@@ -107,6 +107,7 @@ var API_METHODS = {
   addConfigItem: true,
   removeConfigItem: true,
   setRequiredField: true,
+  changePassword: true,
   logClientError: true
 };
 
@@ -403,26 +404,7 @@ function diagnoseSetup() {
   return out;
 }
 
-// ============================ الإقلاع الموحّد ============================
-/** استدعاء واحد بدل اثنين عند الدخول: تسجيل الدخول + القوائم معًا (أداء أفضل). */
-function init(empNo) {
-  var lr = login(empNo);
-  if (!lr.ok) return lr;
-  var config = getConfig();
-  if (lr.user.role === 'admin') config.users = getActiveUsersForAdmin_();
-  return { ok: true, user: lr.user, config: config };
-}
-
-// ============================ المصادقة ============================
-function login(empNo) {
-  empNo = String(empNo || '').trim();
-  if (!empNo) return { ok: false, msg: 'أدخل الرقم الوظيفي.' };
-  var users = getUsers_();
-  var u = users.filter(function(x){ return String(x.emp_no) === empNo && isActive_(x.active); })[0];
-  if (!u) return { ok: false, msg: 'الرقم الوظيفي غير مسجّل.' };
-  return { ok: true, user: { no: u.emp_no, name: u.name, role: u.role, title: u.title } };
-}
-
+// مصادقة الدخول بكلمة المرور موجودة في ملف athar-auth.gs.
 function getUsers_() {
   var cached = CACHE.get('users');
   if (cached) return JSON.parse(cached);

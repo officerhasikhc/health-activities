@@ -5,11 +5,20 @@
   <meta charset="utf-8">
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <?!= include('Stylesheet'); ?>
+  <!-- أنماط صغيرة خاصة بإظهار/إخفاء كلمة المرور وشاشة التغيير (لا تمسّ تنسيقك الحالي) -->
+  <style>
+    .pw-wrap{position:relative}
+    .pw-wrap input{padding-inline-start:58px}
+    .pw-toggle{position:absolute;inset-inline-start:8px;top:50%;transform:translateY(-50%);
+      background:none;border:none;color:var(--muted,#5b6b7b);font-size:12px;cursor:pointer;font-family:inherit;padding:4px}
+    .caps-hint{display:block;font-size:11.5px;color:var(--accent,#9a7b3f);margin-top:6px;min-height:14px}
+  </style>
 </head>
 <body>
 
   <!-- ===================== شاشة الدخول ===================== -->
   <div id="loginScreen" class="login-wrap">
+    <!-- form حقيقي + autocomplete: ليعرض المتصفّح/حساب جوجل حفظ كلمة المرور والرقم الوظيفي -->
     <form class="login-card" id="loginForm" autocomplete="on" onsubmit="doLogin(event); return false;">
       <? if (LOGIN_LOGO_URI) { ?>
         <img class="login-logo" src="<?!= LOGIN_LOGO_URI ?>" alt="شعار وزارة الصحة">
@@ -20,60 +29,64 @@
         المديرية العامة للخدمات الصحية بمحافظة ظفار<br>
         التجمّع الصحي (٢) — مركز صحي حاسك
       </div>
-      
+
       <div class="login-instructions">
         أهلاً بك، يرجى إدخال رقمك الوظيفي وكلمة المرور للمتابعة
       </div>
 
       <div class="input-group">
         <label for="empNo">الرقم الوظيفي</label>
-        <input id="empNo" name="username" type="text" inputmode="numeric" placeholder="مثال: 12345" autocomplete="username" autocapitalize="off" spellcheck="false">
+        <!-- مهم: username بدل off حتى يحفظه مدير كلمات المرور ويملأه لاحقًا -->
+        <input id="empNo" name="username" type="text" inputmode="numeric"
+               autocomplete="username" autocapitalize="off" spellcheck="false"
+               placeholder="مثال: 12345">
       </div>
 
       <div class="input-group">
         <label for="pw">كلمة المرور</label>
         <div class="pw-wrap">
-          <input id="pw" name="password" type="password" autocomplete="current-password" placeholder="كلمة المرور">
+          <input id="pw" name="password" type="password"
+                 autocomplete="current-password" placeholder="كلمة المرور">
           <button type="button" class="pw-toggle" data-for="pw">إظهار</button>
         </div>
         <span class="caps-hint" id="capsHint"></span>
       </div>
-      
+
       <label class="remember-row"><input type="checkbox" id="rememberEmp"> <span>تذكّر الرقم على هذا الجهاز</span></label>
-      
+
       <div class="login-actions">
         <button class="btn btn-primary btn-large" id="loginBtn" type="submit">دخول المنصة</button>
         <button class="btn btn-ghost btn-large install-btn" type="button" onclick="installApp()">تثبيت التطبيق</button>
       </div>
       <div class="login-err" id="loginErr"></div>
-      <div class="login-note">كلمة المرور لأول دخول هي رقمك الوظيفي، وسيُطلب منك تغييرها فورًا.</div>
+      <div class="login-instructions" style="margin-top:14px;font-size:12px">
+        كلمة المرور لأول دخول هي رقمك الوظيفي، وسيُطلب منك تغييرها فورًا.
+      </div>
     </form>
   </div>
 
-  <!-- ===================== شاشة تغيير كلمة المرور ===================== -->
+  <!-- ===================== شاشة تغيير كلمة المرور (إجبارية أول دخول) ===================== -->
   <div id="resetScreen" class="login-wrap hidden">
     <form class="login-card" id="resetForm" autocomplete="on" onsubmit="doChangePassword(event); return false;">
-      <? if (LOGIN_LOGO_URI) { ?>
-        <img class="login-logo" src="<?!= LOGIN_LOGO_URI ?>" alt="شعار وزارة الصحة">
-      <? } ?>
       <div class="brand">تغيير كلمة المرور</div>
       <div class="brand-sub">مطلوب قبل المتابعة</div>
+
+      <!-- حقل مخفي بالرقم الوظيفي ليربط المتصفّح الحفظ بالحساب الصحيح -->
       <input id="resetUser" name="username" type="text" autocomplete="username" class="hidden" readonly>
 
-      <div class="input-group">
+      <div class="input-group" style="margin-top:18px">
         <label for="newPw">كلمة المرور الجديدة</label>
         <div class="pw-wrap">
-          <input id="newPw" name="new-password" type="password" autocomplete="new-password" placeholder="٨ أحرف على الأقل، حرف ورقم">
+          <input id="newPw" name="new-password" type="password"
+                 autocomplete="new-password" placeholder="٨ أحرف على الأقل، حرف ورقم">
           <button type="button" class="pw-toggle" data-for="newPw">إظهار</button>
         </div>
       </div>
 
       <div class="input-group">
         <label for="newPw2">تأكيد كلمة المرور</label>
-        <div class="pw-wrap">
-          <input id="newPw2" name="confirm-password" type="password" autocomplete="new-password" placeholder="أعد كتابتها">
-          <button type="button" class="pw-toggle" data-for="newPw2">إظهار</button>
-        </div>
+        <input id="newPw2" name="confirm-password" type="password"
+               autocomplete="new-password" placeholder="أعد كتابتها">
       </div>
 
       <div class="login-actions">
