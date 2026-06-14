@@ -8,7 +8,7 @@
 var USER_HEADERS = ['emp_no','name','role','title','active',
   'password_hash','salt','must_reset','pwd_updated_at'];
 var PWD_ITERATIONS = 12000;
-var PWD_MIN_LEN = 8;
+var PWD_MIN_LEN = 6;
 var LOGIN_MAX_FAILS = 5;
 var LOGIN_LOCK_SECONDS = 900;
 var ELEVATED_ROLES = ['admin'];
