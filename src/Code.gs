@@ -116,6 +116,7 @@ var API_METHODS = {
   getDashboardItems: true,
   getActivityReportReadiness: true,
   getPeriodReportReadiness: true,
+  getRecentActivitiesForAdmin: true,
   addConfigItem: true,
   removeConfigItem: true,
   setRequiredField: true,
@@ -1149,6 +1150,37 @@ function getDashboard(empNo, filter) {
 
   try { CACHE.put(key, JSON.stringify(out), ACTS_CACHE_TTL); } catch(e) {}
   return out;
+}
+
+function getRecentActivitiesForAdmin(empNo, sinceMs) {
+  var user = requireActiveUser_(empNo);
+  if (user.role !== 'admin') return { items: [], serverNow: Date.now() };
+  var since = parseInt(sinceMs || 0, 10);
+  var cacheKey = actsCacheKey_('recent', {u:String(user.emp_no), s:since});
+  var hit = CACHE.get(cacheKey);
+  if (hit) { try { return JSON.parse(hit); } catch(e) {} }
+
+  var rows = getVisibleActivityRows_(user);
+  var items = [];
+  rows.forEach(function(o){
+    if (!o.created_at) return;
+    var ts = new Date(o.created_at).getTime();
+    if (isNaN(ts) || ts <= since) return;
+    if (String(o.created_by_no) === String(user.emp_no)) return;
+    items.push({
+      id: o.id,
+      title: activityTitle_(o),
+      executor_name: o.executor_name || o.created_by_name || '',
+      type: activityDisplayType_(o),
+      event_date: formatDate_(o.event_date),
+      created_at_ms: ts
+    });
+  });
+  items.sort(function(a,b){ return b.created_at_ms - a.created_at_ms; });
+  if (items.length > 20) items = items.slice(0, 20);
+  var result = { items: items, serverNow: Date.now() };
+  try { CACHE.put(cacheKey, JSON.stringify(result), 60); } catch(e) {}
+  return result;
 }
 
 function getDashboardItems(empNo, dimension, key, filter) {

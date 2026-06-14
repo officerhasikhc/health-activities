@@ -11,7 +11,7 @@ var PWD_ITERATIONS = 4000;
 var PWD_ITERATIONS_LEGACY = 12000;
 var PWD_MIN_LEN = 6;
 var LOGIN_MAX_FAILS = 5;
-var LOGIN_LOCK_SECONDS = 900;
+var LOGIN_LOCK_SECONDS = 300;
 var ELEVATED_ROLES = ['admin'];
 
 function pepper_() {
@@ -83,22 +83,50 @@ function rehashUserPassword_(user, password) {
 }
 
 function failKey_(empNo) { return 'loginfail_' + empNo; }
+function lockUntilKey_(empNo) { return 'loginlock_' + empNo; }
 function isLocked_(empNo) {
   return parseInt(CACHE.get(failKey_(empNo)) || '0', 10) >= LOGIN_MAX_FAILS;
+}
+function lockSecondsLeft_(empNo) {
+  var until = parseInt(CACHE.get(lockUntilKey_(empNo)) || '0', 10);
+  if (!until) return LOGIN_LOCK_SECONDS;
+  var left = Math.ceil((until - Date.now()) / 1000);
+  return left > 0 ? left : 0;
 }
 function registerFail_(empNo) {
   var k = failKey_(empNo);
   var n = parseInt(CACHE.get(k) || '0', 10) + 1;
   CACHE.put(k, String(n), LOGIN_LOCK_SECONDS);
+  if (n >= LOGIN_MAX_FAILS) {
+    CACHE.put(lockUntilKey_(empNo), String(Date.now() + LOGIN_LOCK_SECONDS * 1000), LOGIN_LOCK_SECONDS);
+  }
 }
-function clearFails_(empNo) { CACHE.remove(failKey_(empNo)); }
+function clearFails_(empNo) {
+  CACHE.remove(failKey_(empNo));
+  CACHE.remove(lockUntilKey_(empNo));
+}
+
+// تُشغَّل يدويًا من محرّر السكربت لفكّ القفل عن رقم وظيفي
+function clearLoginLock(empNo) {
+  clearFails_(String(empNo || '').trim());
+  return 'تم فك القفل عن: ' + empNo;
+}
+
+// تُشغَّل يدويًا من محرّر السكربت لفكّ القفل عن جميع المستخدمين دفعة واحدة
+function clearAllLoginLocks() {
+  var users = getUsers_();
+  users.forEach(function(u){ clearFails_(String(u.emp_no)); });
+  return 'تم فك جميع الأقفال (' + users.length + ' مستخدم).';
+}
 
 function login(empNo, password) {
   empNo = String(empNo || '').trim();
   if (!empNo) return { ok: false, msg: 'أدخل الرقم الوظيفي.' };
 
   if (isLocked_(empNo)) {
-    return { ok: false, msg: 'تم إيقاف المحاولات مؤقتًا بسبب تكرار الخطأ. حاول بعد قليل.' };
+    var secs = lockSecondsLeft_(empNo);
+    var mins = Math.max(1, Math.ceil(secs / 60));
+    return { ok: false, msg: 'تم إيقاف المحاولات مؤقتًا بسبب تكرار الخطأ. حاول بعد ' + mins + ' دقيقة.' };
   }
 
   var u = findActiveUser_(empNo);

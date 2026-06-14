@@ -24,6 +24,7 @@ var idleTimer = null;
 var idleEvents = ['click','keydown','touchstart','mousemove','scroll','input'];
 
 function invalidateCaches(){ REC_CACHE = {}; DASH_CACHE = {}; REC_PENDING = {}; DASH_PENDING = {}; }
+function isAdmin_(){ return !!(USER && USER.role==='admin'); }
 
 /* ====================== مساعد استدعاء الخادم ====================== */
 function run(fn){
@@ -173,6 +174,7 @@ function logout(){
 }
 function forceLogout(message){
   stopSessionGuard();
+  try { AdminNotify.stop(); } catch (e) {}
   USER=null; CONFIG=null; FORM=null;
   clearSession();
   if(message) sessionStorage.setItem(SESSION_MSG_KEY, message);
@@ -291,7 +293,8 @@ function boot(){
   show('register');
   syncOutbox();      // رفع أي محفوظ محليًا من جلسة سابقة
   updatePending();
-  updateBellAndBadges();
+  if (isAdmin_()) AdminNotify.start();
+  else updateBellAndBadges();
   Warmup.afterLogin();
 }
 
@@ -304,7 +307,7 @@ function renderTabs(){
   if(USER.role==='admin') tabs.push({id:'admin', label:'الإدارة'});
   document.getElementById('tabsBar').innerHTML=tabs.map(function(t){
     var warm=(t.id==='records'||t.id==='dashboard')?' onpointerenter="Warmup.intent(\''+t.id+'\')" ontouchstart="Warmup.intent(\''+t.id+'\')"':'';
-    var badgeHtml = t.id==='records' ? '<span id="tabBadge_records" class="nav-badge hidden">جديد</span>' : '';
+    var badgeHtml = (t.id==='records' && !isAdmin_()) ? '<span id="tabBadge_records" class="nav-badge hidden">جديد</span>' : '';
     return '<button class="tab" data-tab="'+t.id+'" onclick="onTabClick(\''+t.id+'\')"'+warm+'>'+t.label+' '+badgeHtml+'</button>';
   }).join('');
 }
@@ -349,10 +352,117 @@ function updateBellAndBadges(addedCount) {
 }
 
 function onBellClick() {
+  if (isAdmin_()) { AdminNotify.toggle(); return; }
   localStorage.setItem('new_activity_count', 0);
   updateBellAndBadges();
   show('records');
 }
+
+/* ====================== إشعارات المسؤول ====================== */
+var AdminNotify = (function(){
+  var POLL_MS = 60000;
+  var timer = null;
+  var open = false;
+  var items = [];
+  var lastSeen = 0;
+
+  function lsKey(){ return 'admin_last_seen_ms_' + (USER ? USER.no : ''); }
+  function loadLastSeen(){
+    var v = parseInt(localStorage.getItem(lsKey()) || '0', 10);
+    lastSeen = isNaN(v) ? 0 : v;
+  }
+  function saveLastSeen(ms){
+    lastSeen = ms;
+    localStorage.setItem(lsKey(), String(ms));
+  }
+  function fmtTime(ms){
+    var d = new Date(ms);
+    var pad = function(n){ return n<10?'0'+n:''+n; };
+    return d.getFullYear()+'/'+pad(d.getMonth()+1)+'/'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+  }
+  function renderPanel(){
+    var panel = document.getElementById('bellPanel');
+    if (!panel) return;
+    if (!items.length) {
+      panel.innerHTML = '<div class="bell-empty">لا توجد إشعارات.</div>';
+      return;
+    }
+    panel.innerHTML = '<div class="bell-head">آخر الإضافات</div>' +
+      items.map(function(it){
+        return '<div class="bell-item" onclick="AdminNotify.onItem(\''+ esc(String(it.id)) +'\')">'+
+          '<div class="bell-item-title">'+ esc(it.title || 'فعالية') +'</div>'+
+          '<div class="bell-item-sub"><span>'+ esc(it.executor_name || '') +'</span>'+
+          (it.type ? ' · <span>'+ esc(it.type) +'</span>' : '') +
+          ' · <span>'+ fmtTime(it.created_at_ms) +'</span></div>'+
+          '</div>';
+      }).join('');
+  }
+  function setBellCount(n){
+    var b = document.getElementById('bellIcon');
+    var bdg = document.getElementById('bellBadge');
+    if (b) b.classList.remove('hidden');
+    if (n > 0) { if(bdg){ bdg.classList.remove('hidden'); bdg.innerText = n; } }
+    else { if(bdg) bdg.classList.add('hidden'); }
+  }
+  function poll(){
+    if (!USER || !isAdmin_()) return;
+    run('getRecentActivitiesForAdmin', USER.no, lastSeen).then(function(r){
+      if (!r) return;
+      items = (r.items || []).slice();
+      setBellCount(items.length);
+      if (open) renderPanel();
+    }).catch(function(){});
+  }
+  return {
+    start: function(){
+      loadLastSeen();
+      if (!lastSeen) saveLastSeen(Date.now());
+      setBellCount(0);
+      poll();
+      if (timer) clearInterval(timer);
+      timer = setInterval(poll, POLL_MS);
+    },
+    stop: function(){
+      if (timer) { clearInterval(timer); timer = null; }
+      open = false;
+      var panel = document.getElementById('bellPanel');
+      if (panel) panel.classList.add('hidden');
+    },
+    toggle: function(){
+      var panel = document.getElementById('bellPanel');
+      if (!panel) return;
+      open = !open;
+      if (open) {
+        renderPanel();
+        panel.classList.remove('hidden');
+        if (items.length) {
+          saveLastSeen(items[0].created_at_ms + 1);
+          setBellCount(0);
+        }
+      } else {
+        panel.classList.add('hidden');
+      }
+    },
+    close: function(){
+      open = false;
+      var panel = document.getElementById('bellPanel');
+      if (panel) panel.classList.add('hidden');
+    },
+    onItem: function(id){
+      AdminNotify.close();
+      show('records');
+    },
+    refresh: poll
+  };
+})();
+document.addEventListener('click', function(ev){
+  if (!isAdmin_()) return;
+  var bell = document.getElementById('bellIcon');
+  var panel = document.getElementById('bellPanel');
+  if (!bell || !panel || panel.classList.contains('hidden')) return;
+  if (bell.contains(ev.target) || panel.contains(ev.target)) return;
+  AdminNotify.close();
+});
 
 /* ====================== الفترة والمعرّفات ====================== */
 function makeId(prefix){
@@ -955,10 +1065,10 @@ function directSave(payload,btn,okMsg){
   });
 }
 function rememberSavedPeriod(payload){ PENDING_RECORD_FILTER=filterFromDate(payload && payload.event_date); }
-function onSaved(msg, wasEdit){ SUBMITTING=false; if(FORM) FORM._new_unsaved=false; rememberSavedPeriod(FORM); invalidateCaches(); updatePending(); if(!wasEdit) updateBellAndBadges(1); toast(msg,'ok'); show('records'); }
+function onSaved(msg, wasEdit){ SUBMITTING=false; if(FORM) FORM._new_unsaved=false; rememberSavedPeriod(FORM); invalidateCaches(); updatePending(); if(!wasEdit && !isAdmin_()) updateBellAndBadges(1); toast(msg,'ok'); show('records'); }
 function onSavedLocal(options, wasEdit){ invalidateCaches(); updatePending();
   SUBMITTING=false;
-  if(!wasEdit) updateBellAndBadges(1);
+  if(!wasEdit && !isAdmin_()) updateBellAndBadges(1);
   show('records');
   if(typeof options==='string') options={ message:options };
   if(options && options.silent) return;
