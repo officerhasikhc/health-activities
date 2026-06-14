@@ -1503,6 +1503,7 @@ function handleDownloadResponse(r, label){
   if(r.delivery==='inline' && r.base64){
     var blob=base64ToBlob(r.base64, r.mime||'application/octet-stream');
     triggerBlobDownload(blob, r.fileName||r.name||('athar-'+String(label||'file').toLowerCase()));
+    showInlineDownloadFallback(blob, r.fileName||r.name||('athar-'+String(label||'file').toLowerCase()), label);
     return;
   }
   var url=r.downloadUrl||r.url;
@@ -1524,6 +1525,15 @@ function showDownloadFallback(r, label){
     (meta.length?'<div class="hint">'+esc(meta.join(' · '))+'</div>':''),
     '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
     '<a class="btn btn-primary" target="_blank" rel="noopener" href="'+escAttr(url)+'">تحميل الملف</a>');
+}
+function showInlineDownloadFallback(blob, name, label){
+  var url=URL.createObjectURL(blob);
+  var safeName=name||('athar-'+String(label||'file').toLowerCase());
+  openModal('تحميل '+esc(label||'الملف'),
+    '<p style="margin:0 0 10px">إذا لم يبدأ التحميل تلقائيًا، استخدم زر التحميل اليدوي.</p>',
+    '<button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>'+
+    '<a class="btn btn-primary" download="'+escAttr(safeName)+'" href="'+escAttr(url)+'">تحميل الملف</a>');
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 120000);
 }
 function base64ToBlob(base64, mime){
   var bin=atob(base64), len=bin.length, chunks=[];

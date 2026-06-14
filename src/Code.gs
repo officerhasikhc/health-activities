@@ -1442,6 +1442,21 @@ function exportActivitiesExcelDownload(filter, actorEmpNo) {
   return response;
 }
 
+function activitiesExcelLayout_(dataLength) {
+  var count = Math.max(0, parseInt(dataLength, 10) || 0);
+  var summaryStart = 1;
+  var summaryRows = 5;
+  var headerRow = summaryStart + summaryRows + 1;
+  var dataStart = headerRow + 1;
+  return {
+    summaryStart: summaryStart,
+    headerRow: headerRow,
+    dataStart: dataStart,
+    preparedStart: dataStart + count + 1,
+    tableRows: 1 + count
+  };
+}
+
 function buildActivitiesExcelBlob_(filter, user) {
   var period = normalizePeriodFilter_(filter);
   var periodLabel = periodLabel_(period);
@@ -1487,46 +1502,47 @@ function buildActivitiesExcelBlob_(filter, user) {
       pCount
     ];
   });
+  var layout = activitiesExcelLayout_(data.length);
 
-  // صف العناوين في السطر 1
-  sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold')
+  // بيانات التقرير أعلى الجدول.
+  sh.getRange(layout.summaryStart, 1).setValue('تقرير البرامج والمبادرات الصحية').setFontWeight('bold').setFontSize(12).setFontColor('#1a4d5c');
+  sh.getRange(layout.summaryStart + 1, 1).setValue('الفترة: ' + periodLabel).setFontColor('#3a5a66');
+  sh.getRange(layout.summaryStart + 2, 1).setValue('عدد البرامج والمبادرات الصحية المنفذة: ' + rows.length).setFontColor('#3a5a66');
+  sh.getRange(layout.summaryStart + 3, 1).setValue('إجمالي المستفيدين: ' + totalBeneficiaries).setFontColor('#3a5a66');
+  sh.getRange(layout.summaryStart + 4, 1).setValue('إجمالي الصور: ' + totalPhotos).setFontColor('#3a5a66');
+
+  // صف العناوين بعد ملخص التقرير.
+  sh.getRange(layout.headerRow, 1, 1, headers.length).setValues([headers]).setFontWeight('bold')
     .setBackground('#1a4d5c').setFontColor('#ffffff').setHorizontalAlignment('center')
     .setVerticalAlignment('middle').setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-  sh.setRowHeight(1, 36);
+  sh.setRowHeight(layout.headerRow, 36);
 
-  // البيانات تبدأ من السطر 2
+  // البيانات تبدأ بعد صف العناوين.
   if (data.length) {
-    sh.getRange(2, 1, data.length, headers.length).setValues(data);
+    sh.getRange(layout.dataStart, 1, data.length, headers.length).setValues(data);
     // ألوان صفوف متناوبة
     for (var r = 0; r < data.length; r++) {
       if (r % 2 === 1) {
-        sh.getRange(r + 2, 1, 1, headers.length).setBackground('#f4f8f9');
+        sh.getRange(layout.dataStart + r, 1, 1, headers.length).setBackground('#f4f8f9');
       }
     }
     // محاذاة عمود م (الترقيم) وعدد الصور والمستفيدين
-    sh.getRange(2, 1, data.length, 1).setHorizontalAlignment('center');
-    sh.getRange(2, 12, data.length, 1).setHorizontalAlignment('center');
-    sh.getRange(2, 17, data.length, 1).setHorizontalAlignment('center');
+    sh.getRange(layout.dataStart, 1, data.length, 1).setHorizontalAlignment('center');
+    sh.getRange(layout.dataStart, 12, data.length, 1).setHorizontalAlignment('center');
+    sh.getRange(layout.dataStart, 17, data.length, 1).setHorizontalAlignment('center');
   }
 
   // حدود الجدول
-  var tableRows = 1 + data.length;
-  if (tableRows > 0) {
-    sh.getRange(1, 1, tableRows, headers.length).setBorder(true, true, true, true, true, true,
+  if (layout.tableRows > 0) {
+    sh.getRange(layout.headerRow, 1, layout.tableRows, headers.length).setBorder(true, true, true, true, true, true,
       '#d0d7db', SpreadsheetApp.BorderStyle.SOLID);
   }
 
-  // بيانات التقرير أسفل الجدول
-  var footerStart = data.length + 3;
-  sh.getRange(footerStart, 1).setValue('تقرير البرامج والمبادرات الصحية').setFontWeight('bold').setFontSize(12).setFontColor('#1a4d5c');
-  sh.getRange(footerStart + 1, 1).setValue('الفترة: ' + periodLabel).setFontColor('#3a5a66');
-  sh.getRange(footerStart + 2, 1).setValue('عدد البرامج والمبادرات الصحية المنفذة: ' + rows.length).setFontColor('#3a5a66');
-  sh.getRange(footerStart + 3, 1).setValue('إجمالي المستفيدين: ' + totalBeneficiaries).setFontColor('#3a5a66');
-  sh.getRange(footerStart + 4, 1).setValue('إجمالي الصور: ' + totalPhotos).setFontColor('#3a5a66');
-  sh.getRange(footerStart + 5, 1).setValue('إعداد: ' + (user.name || user.emp_no)).setFontColor('#5b6b7b');
-  sh.getRange(footerStart + 6, 1).setValue('تاريخ الإعداد: ' + preparedAt).setFontColor('#5b6b7b');
+  // بيانات الإعداد تبقى أسفل الجدول.
+  sh.getRange(layout.preparedStart, 1).setValue('إعداد: ' + (user.name || user.emp_no)).setFontColor('#5b6b7b');
+  sh.getRange(layout.preparedStart + 1, 1).setValue('تاريخ الإعداد: ' + preparedAt).setFontColor('#5b6b7b');
 
-  sh.setFrozenRows(1);
+  sh.setFrozenRows(layout.headerRow);
   sh.autoResizeColumns(1, headers.length);
   // عرض أدنى لعمود م
   sh.setColumnWidth(1, 40);
