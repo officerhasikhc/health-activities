@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 function loadCodeGs() {
   const codePath = path.join(__dirname, '..', 'src', 'Code.gs');
-  const code = fs.readFileSync(codePath, 'utf8');
+  const authPath = path.join(__dirname, '..', 'src', 'athar-auth.gs');
   const context = {
     console,
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => '', setProperty: () => {} }) },
@@ -28,7 +28,9 @@ function loadCodeGs() {
   };
   context.globalThis = context;
   vm.createContext(context);
-  vm.runInContext(code, context, { filename: codePath });
+  for (const file of [codePath, authPath]) {
+    vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
+  }
   return context;
 }
 
@@ -54,6 +56,36 @@ test('activity readiness blocks required report fields', () => {
     'photos',
     'partners'
   ]);
+});
+
+test('password auth rejects wrong default password and requires reset on first login', () => {
+  const ctx = loadCodeGs();
+  ctx.getUsers_ = () => [{
+    emp_no: '65886',
+    name: 'عبدالباقي عبدالهادي مرزوق بيت مرواس',
+    role: 'admin',
+    title: 'المشرف الإداري / مسؤول النظام',
+    active: true,
+    password_hash: '',
+    salt: '',
+    must_reset: true
+  }];
+  ctx.getConfig = () => ({ activity_type: [], target_group: [], mechanism: [] });
+  ctx.getActiveUsersForAdmin_ = () => [];
+  ctx.logAudit_ = () => {};
+
+  const rejected = ctx.login('65886', 'not-the-employee-number');
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.msg, /كلمة المرور/);
+
+  const accepted = ctx.login('65886', '65886');
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.mustReset, true);
+
+  const init = ctx.init('65886', '65886');
+  assert.equal(init.ok, true);
+  assert.equal(init.mustReset, true);
+  assert.equal(init.config, undefined);
 });
 
 test('activity readiness accepts existing Drive photos', () => {

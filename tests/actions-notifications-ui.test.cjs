@@ -16,6 +16,42 @@ test('toast containers are accessible live regions in both entrypoints', () => {
   }
 });
 
+test('login screens use password-manager friendly forms in both entrypoints', () => {
+  for (const file of ['docs/index.html', 'src/Index.html']) {
+    const html = read(file);
+    assert.match(html, /<form[^>]*id="loginForm"[^>]*autocomplete="on"[^>]*onsubmit="doLogin\(event\); return false;"/, file);
+    assert.match(html, /id="empNo"[^>]*name="username"[^>]*autocomplete="username"/, file);
+    assert.match(html, /id="pw"[^>]*name="password"[^>]*type="password"[^>]*autocomplete="current-password"/, file);
+    assert.match(html, /class="pw-toggle"[^>]*data-for="pw"/, file);
+    assert.match(html, /id="capsHint"/, file);
+    assert.match(html, /id="resetScreen"[^>]*class="login-wrap hidden"/, file);
+    assert.match(html, /id="resetForm"[^>]*autocomplete="on"[^>]*onsubmit="doChangePassword\(event\); return false;"/, file);
+    assert.match(html, /id="newPw"[^>]*autocomplete="new-password"/, file);
+    assert.match(html, /id="newPw2"[^>]*autocomplete="new-password"/, file);
+    assert.match(html, /install-btn"[^>]*type="button"/, file);
+  }
+});
+
+test('auth client uses password init and does not refresh sessions without a password', () => {
+  for (const file of ['docs/app.js', 'src/JavaScript.html']) {
+    const js = read(file);
+    assert.match(js, /function doChangePassword\(ev\)/, file);
+    assert.match(js, /run\('init',\s*no,\s*pass\)/, file);
+    assert.match(js, /run\('changePassword',\s*\[?no/, file);
+    assert.match(js, /navigator\.credentials\.store/, file);
+    assert.doesNotMatch(js, /run\('init',\s*s\.no\)/, file);
+  }
+});
+
+test('password auth API is exposed through direct and bridge callers', () => {
+  const code = read('src/Code.gs');
+  const bridge = read('src/Bridge.html');
+  const claspIgnore = read('.claspignore');
+  assert.match(code, /changePassword:\s*true/, 'src/Code.gs');
+  assert.match(bridge, /changePassword:\s*true/, 'src/Bridge.html');
+  assert.match(claspIgnore, /!\*\.gs|!athar-auth\.gs/, '.claspignore');
+});
+
 test('record actions use approved calm command classes in both UI scripts', () => {
   for (const file of ['docs/app.js', 'src/JavaScript.html']) {
     const js = read(file);
@@ -89,5 +125,6 @@ test('styles define calm action buttons, focus state, sync note, and toast detai
     assert.match(css, /\.sync-note/, file);
     assert.match(css, /\.toast-detail/, file);
     assert.match(css, /#toast\.warn/, file);
+    assert.match(css, /input\[type=password\]/, file);
   }
 });
