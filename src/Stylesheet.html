@@ -38,9 +38,19 @@
   .topbar-spacer{flex:1}
   .who{font-size:12.5px;text-align:left;color:#dfe9ea;display:flex;align-items:center;gap:10px}
   .who b{display:block;font-size:13px;color:#fff;line-height:1.2}
+  .bell-wrap{position:relative;display:inline-flex;align-items:center}
   .bell-icon{position:relative;cursor:pointer;font-size:18px;margin-left:4px;transition:transform 0.2s}
   .bell-icon:hover{transform:scale(1.1)}
   .bell-badge{position:absolute;top:-4px;right:-6px;background:var(--err);color:#fff;font-size:10px;font-weight:bold;padding:1px 5px;border-radius:10px;min-width:16px;text-align:center;line-height:1.2}
+  .bell-panel{position:absolute;top:100%;margin-top:8px;inset-inline-start:0;width:320px;max-height:380px;overflow-y:auto;background:#fff;color:#1f2d33;border:1px solid #dde4e6;border-radius:8px;box-shadow:0 12px 32px rgba(0,0,0,.18);z-index:1000;text-align:right;font-size:12.5px}
+  .bell-panel.hidden{display:none}
+  .bell-head{padding:8px 12px;border-bottom:1px solid #eef1f2;font-weight:700;color:#1a4d5c;background:#f7fafb;border-radius:8px 8px 0 0}
+  .bell-empty{padding:18px 12px;color:#6b7a80;text-align:center}
+  .bell-item{padding:9px 12px;border-bottom:1px solid #f2f4f5;cursor:pointer;transition:background .15s}
+  .bell-item:last-child{border-bottom:0}
+  .bell-item:hover{background:#f3f8fa}
+  .bell-item-title{font-weight:600;color:#1f2d33;margin-bottom:3px;line-height:1.35}
+  .bell-item-sub{color:#6b7a80;font-size:11px;line-height:1.4}
   .nav-badge{background:var(--err);color:#fff;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:10px;margin-right:6px;animation:pulseRed 1.5s infinite;display:inline-block;vertical-align:middle}
   @keyframes pulseRed{0%{box-shadow:0 0 0 0 rgba(178,59,59,0.7)}70%{box-shadow:0 0 0 6px rgba(178,59,59,0)}100%{box-shadow:0 0 0 0 rgba(178,59,59,0)}}
   .btn-logout{background:transparent;border:1px solid rgba(255,255,255,.4);
