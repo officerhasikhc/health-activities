@@ -7,6 +7,12 @@ function read(file) {
   return fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 }
 
+function allowedMethodsFromObject(source, objectName) {
+  const match = source.match(new RegExp(`var\\s+${objectName}\\s*=\\s*\\{([\\s\\S]*?)\\};`));
+  assert.ok(match, `${objectName} object exists`);
+  return Array.from(match[1].matchAll(/([A-Za-z_$][\w$]*)\s*:\s*true/g)).map((m) => m[1]).sort();
+}
+
 test('toast containers are accessible live regions in both entrypoints', () => {
   for (const file of ['docs/index.html', 'src/Index.html']) {
     const html = read(file);
@@ -55,6 +61,13 @@ test('password auth API is exposed through direct and bridge callers', () => {
   assert.match(claspIgnore, /!\*\.gs|!athar-auth\.gs/, '.claspignore');
 });
 
+test('bridge fallback allows every public API method exposed by doPost', () => {
+  const codeMethods = allowedMethodsFromObject(read('src/Code.gs'), 'API_METHODS');
+  const bridgeMethods = allowedMethodsFromObject(read('src/Bridge.html'), 'ALLOWED_METHODS');
+
+  assert.deepEqual(bridgeMethods, codeMethods);
+});
+
 test('record actions use approved calm command classes in both UI scripts', () => {
   for (const file of ['docs/app.js', 'src/JavaScript.html']) {
     const js = read(file);
@@ -77,6 +90,16 @@ test('period export uses combined PDF flow instead of ZIP labels', () => {
     assert.match(js, /exportActivitiesPdfDownload/, file);
     assert.doesNotMatch(js, /تحميل ZIP/, file);
     assert.doesNotMatch(js, /function exportZip\(\)/, file);
+  }
+});
+
+test('inline downloads expose a manual fallback link after automatic download attempt', () => {
+  for (const file of ['docs/app.js', 'src/JavaScript.html']) {
+    const js = read(file);
+    assert.match(js, /function showInlineDownloadFallback\(blob, name, label\)/, file);
+    assert.match(js, /showInlineDownloadFallback\(blob,\s*r\.fileName\|\|r\.name/, file);
+    assert.match(js, /URL\.createObjectURL\(blob\)/, file);
+    assert.match(js, /تحميل الملف/, file);
   }
 });
 

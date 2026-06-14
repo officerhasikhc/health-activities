@@ -184,3 +184,17 @@ test('combined period PDF HTML includes each activity as an independent report s
   assert.match(html, /اليوم العالمي للصحة/);
   assert.match(html, /period-break/);
 });
+
+test('Excel period export layout places report summary before the table and preparer after data', () => {
+  const ctx = loadCodeGs();
+  assert.equal(typeof ctx.activitiesExcelLayout_, 'function');
+
+  const layout = JSON.parse(JSON.stringify(ctx.activitiesExcelLayout_(6)));
+  assert.deepEqual(layout, {
+    summaryStart: 1,
+    headerRow: 7,
+    dataStart: 8,
+    preparedStart: 15,
+    tableRows: 7
+  });
+});
