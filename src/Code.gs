@@ -13,6 +13,18 @@ var PHOTO_ROOT_NAME = 'أثر - صور الفعاليات';
 var PROP = PropertiesService.getScriptProperties();
 var CACHE = CacheService.getScriptCache();
 
+var ACTS_CACHE_TTL = 300;
+function actsVersion_() { return CACHE.get('acts_ver') || '0'; }
+function bumpActsVersion_() {
+  var v = (parseInt(CACHE.get('acts_ver') || '0', 10) + 1) % 1000000;
+  CACHE.put('acts_ver', String(v), 21600);
+}
+function actsCacheKey_(prefix, parts) {
+  var raw = actsVersion_() + '|' + JSON.stringify(parts || null);
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw);
+  return prefix + '_' + Utilities.base64Encode(digest);
+}
+
 var SHEETS = {
   CONFIG: 'Config',
   USERS: 'Users',
@@ -759,7 +771,8 @@ function saveActivityLocked_(payload, actorEmpNo) {
   }
   
   logAudit_(actor, isNew ? 'إضافة' : 'تعديل', activityTitle_(row));
-  
+  bumpActsVersion_();
+
   return { ok:true, id:id };
 }
 
@@ -1025,11 +1038,16 @@ function periodLabel_(filter) {
 
 function getActivities(empNo, filterOrYear, month) {
   var user = requireActiveUser_(empNo);
+  var key = actsCacheKey_('acts', {u:String(user.emp_no), r:user.role, f:filterOrYear||null, m:month||null});
+  var hit = CACHE.get(key);
+  if (hit) { try { return JSON.parse(hit); } catch(e) {} }
+
   var rows = getVisibleActivityRows_(user);
   rows = filterActivityRows_(rows, normalizePeriodFilter_(filterOrYear, month));
-
   rows.sort(function(a,b){ return new Date(b.event_date) - new Date(a.event_date); });
-  return rows.map(activityClientRow_);
+  var result = rows.map(activityClientRow_);
+  try { CACHE.put(key, JSON.stringify(result), ACTS_CACHE_TTL); } catch(e) {}
+  return result;
 }
 
 function getVisibleActivityRows_(user) {
@@ -1074,6 +1092,7 @@ function deleteActivity(id, actorEmpNo) {
   var targetTitle = activityTitle_(row);
   sh.deleteRow(rowIndex);
   logAudit_(user, 'حذف', targetTitle);
+  bumpActsVersion_();
   return { ok:true };
 }
 
@@ -1087,6 +1106,10 @@ function formatDate_(v) {
 // ============================ لوحة المؤشرات ============================
 function getDashboard(empNo, filter) {
   var user = requireActiveUser_(empNo);
+  var key = actsCacheKey_('dash', {u:String(user.emp_no), r:user.role, f:filter||null});
+  var hit = CACHE.get(key);
+  if (hit) { try { return JSON.parse(hit); } catch(e) {} }
+
   var out = { total:0, beneficiaries:0, byType:{}, byMonth:{}, byHalf:{}, byQuarter:{}, byMechanism:{}, partnerships:0, byExecutor:{} };
   var rows = filterActivityRows_(getVisibleActivityRows_(user), normalizePeriodFilter_(filter));
 
@@ -1123,7 +1146,8 @@ function getDashboard(empNo, filter) {
     }
   } catch(e) {}
   out.auditLogs = auditLogs;
-  
+
+  try { CACHE.put(key, JSON.stringify(out), ACTS_CACHE_TTL); } catch(e) {}
   return out;
 }
 
@@ -1231,7 +1255,39 @@ function buildActivityPdfBlob_(activity, fileNameOverride) {
     .setName(fileName);
 }
 
+function periodPdfFingerprint_(rows, periodLabel, user) {
+  var parts = rows.map(function(a){
+    return [a.id, a.event_date, a.photo_ids, a.title, a.objective, a.notes,
+            a.target_groups, a.mechanism, a.beneficiaries, a.partners, a.status].join('');
+  });
+  parts.sort();
+  var seed = (user ? user.emp_no : '') + '' + periodLabel + '' + parts.join('\n');
+  return Utilities.base64Encode(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, seed)
+  );
+}
+
+function periodPdfCacheKey_(user, periodLabel) {
+  var seed = (user ? user.emp_no : '') + '' + periodLabel;
+  return 'pdf_' + Utilities.base64Encode(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, seed)
+  );
+}
+
 function buildActivitiesPeriodPdfBlob_(rows, periodLabel, user) {
+  var fp = periodPdfFingerprint_(rows, periodLabel, user);
+  var cacheKey = periodPdfCacheKey_(user, periodLabel);
+  var hit = CACHE.get(cacheKey);
+  if (hit) {
+    try {
+      var meta = JSON.parse(hit);
+      if (meta && meta.fp === fp && meta.fileId) {
+        var cached = DriveApp.getFileById(meta.fileId).getBlob();
+        return cached.setName(meta.name || cached.getName());
+      }
+    } catch (e) {}
+  }
+
   var letter = getOfficialLetterBlob_();
   var letterDataUri = letter ? blobDataUri_(letter) : '';
   var photosById = {};
@@ -1245,9 +1301,36 @@ function buildActivitiesPeriodPdfBlob_(rows, periodLabel, user) {
   });
   var html = buildActivitiesPeriodPdfHtml_(rows, letterDataUri, photosById);
   var fileName = safeFileName_('تقرير أثر PDF - ' + (user.name || user.emp_no) + ' - ' + periodLabel) + '.pdf';
-  return Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
+  var blob = Utilities.newBlob(html, 'text/html', fileName.replace(/\.pdf$/,'') + '.html')
     .getAs(MimeType.PDF)
     .setName(fileName);
+
+  try {
+    var folder = getPdfCacheFolder_();
+    if (hit) {
+      try {
+        var prev = JSON.parse(hit);
+        if (prev && prev.fileId) {
+          try { DriveApp.getFileById(prev.fileId).setTrashed(true); } catch (e) {}
+        }
+      } catch (e) {}
+    }
+    var saved = folder.createFile(blob);
+    CACHE.put(cacheKey, JSON.stringify({ fp: fp, fileId: saved.getId(), name: fileName }), 21600);
+  } catch (e) {}
+
+  return blob;
+}
+
+function getPdfCacheFolder_() {
+  var folderId = PROP.getProperty('PDF_CACHE_FOLDER_ID');
+  if (folderId) {
+    try { return DriveApp.getFolderById(folderId); } catch (e) {}
+  }
+  var root = getReportRoot_();
+  var f = root.createFolder('_cache');
+  PROP.setProperty('PDF_CACHE_FOLDER_ID', f.getId());
+  return f;
 }
 
 function getReportRoot_() {
@@ -1590,4 +1673,10 @@ function buildActivitiesPeriodPdfHtml_(activities, letterDataUri, photosById) {
   return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
     '<style>' + pdfDocumentCss_(letterDataUri) + '</style>' +
     '</head><body>' + sections + '</body></html>';
+}
+
+// مُشغّل تسخين خفيف لتقليل البدء البارد — يُربط من Triggers يدويًا (كل 5 دقائق)
+function warmupKeepAlive_() {
+  try { ss_().getName(); } catch (e) {}
+  return true;
 }
