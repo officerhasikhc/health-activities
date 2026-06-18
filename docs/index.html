@@ -29,7 +29,7 @@
   <link rel="icon" href="assets/logo-login.png">
   <link rel="apple-touch-icon" href="assets/logo-login.png">
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260614-auth2">
+  <link rel="stylesheet" href="styles.css?v=20260618-login3">
 </head>
 <body>
 
@@ -55,7 +55,7 @@
       <div class="input-group">
         <label for="pw">كلمة المرور</label>
         <div class="pw-wrap">
-          <input id="pw" name="password" type="password" autocomplete="off" placeholder="كلمة المرور">
+          <input id="pw" name="athar-pw" type="password" autocomplete="off" placeholder="كلمة المرور">
           <button type="button" class="pw-toggle" data-for="pw">إظهار</button>
         </div>
         <span class="caps-hint" id="capsHint"></span>
@@ -138,7 +138,8 @@
   <div id="toast" role="status" aria-live="polite" aria-atomic="true"><span class="toast-bar"></span><span class="toast-icon"></span><span class="toast-msg"></span></div>
 
   <script>
-    window.ATHAR_BRIDGE_URL = 'https://script.google.com/macros/s/AKfycbxUg1TtF9Nmr7G_r6m0QznyPAvc2XXNTjJisNOFUTPhFZ2wbyDxrk-s5gx4e7L3w9N9wQ/exec?bridge=1';
+    window.ATHAR_EXEC_URL = 'https://script.google.com/macros/s/AKfycbxUg1TtF9Nmr7G_r6m0QznyPAvc2XXNTjJisNOFUTPhFZ2wbyDxrk-s5gx4e7L3w9N9wQ/exec';
+    window.ATHAR_BRIDGE_URL = window.ATHAR_EXEC_URL + '?bridge=1';
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function(){
         navigator.serviceWorker.register('./sw.js').catch(function(){});
@@ -146,9 +147,9 @@
     }
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="debug.js?v=20260614-auth2"></script>
-  <script src="server-bridge.js?v=20260614-auth2"></script>
-  <script src="offline.js?v=20260614-auth2"></script>
-  <script src="app.js?v=20260614-auth2"></script>
+  <script src="debug.js?v=20260618-login3"></script>
+  <script src="server-bridge.js?v=20260618-login3"></script>
+  <script src="offline.js?v=20260618-login3"></script>
+  <script src="app.js?v=20260618-login3"></script>
 </body>
 </html>

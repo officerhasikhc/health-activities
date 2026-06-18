@@ -27,7 +27,7 @@ test('login screens use password-manager friendly forms in both entrypoints', ()
     const html = read(file);
     assert.match(html, /<form[^>]*id="loginForm"[^>]*autocomplete="off"[^>]*onsubmit="doLogin\(event\); return false;"/, file);
     assert.match(html, /id="empNo"[^>]*name="username"[^>]*autocomplete="username"/, file);
-    assert.match(html, /id="pw"[^>]*name="password"[^>]*type="password"[^>]*autocomplete="off"/, file);
+    assert.match(html, /id="pw"[^>]*name="athar-pw"[^>]*type="password"[^>]*autocomplete="off"/, file);
     assert.match(html, /class="pw-toggle"[^>]*data-for="pw"/, file);
     assert.match(html, /id="capsHint"/, file);
     assert.match(html, /id="resetScreen"[^>]*class="login-wrap hidden"/, file);

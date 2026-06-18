@@ -11,9 +11,10 @@
   // رابط /exec المباشر (بدون bridge=1) لاستدعاء doPost عبر fetch
   var execUrl = window.ATHAR_EXEC_URL ||
     (bridgeUrl ? bridgeUrl.replace(/([?&])bridge=1(&|$)/, '$1').replace(/[?&]$/, '') : '');
-  var fetchBroken = false;  // إن فشل fetch مرة (CORS مثلًا) ننتقل للجسر مباشرة
+  var fetchFailCount = 0;   // عدد فشل fetch المتتالي — بعد 3 ننتقل للجسر
+  var FETCH_MAX_FAILS = 3;
   var fetchProven = false;  // أوّل fetch نجح؟ بعدها نمنح مهلة أطول
-  var FETCH_PROBE_MS = 3500;
+  var FETCH_PROBE_MS = 15000;
   var FETCH_FULL_MS = 60000;
   var bridgeFrame = null;
   var bridgeWindow = null;
@@ -81,7 +82,7 @@
         timer: setTimeout(function(){
           readyWaiters = readyWaiters.filter(function(w){ return w !== waiter; });
           log('انتهت مهلة الانتظار (' + timeoutMs + 'ms) دون ready — الجسر لم يستجب');
-          reject(new Error('تعذّر تجهيز الاتصال. أعد تحميل الصفحة، أو افتح الرابط من متصفح Chrome/Safari مباشرة.'));
+          reject(new Error('تعذّر الاتصال بالخادم. يُرجى الانتظار ثم إعادة المحاولة.'));
         }, timeoutMs)
       };
       readyWaiters.push(waiter);
@@ -165,14 +166,26 @@
 
   window.AtharServer = {
     run: function(fn, args){
-      // إن سبق نجاح/فشل fetch نلتزم بالقرار لتفادي التأخير
-      if (fetchBroken) {
-        return bridgeCall(fn, args).catch(function(err){ log('فشل الطلب:', fn, '->', err && err.message); throw err; });
+      // إن تجاوزنا حد الفشل المتتالي ننتقل للجسر مع إعادة ضبط العدّاد لاحقًا
+      if (fetchFailCount >= FETCH_MAX_FAILS) {
+        return bridgeCall(fn, args).catch(function(err){
+          log('فشل الطلب عبر الجسر:', fn, '->', err && err.message);
+          // الجسر فشل أيضًا — نعيد ضبط العدّاد لإعادة محاولة fetch
+          fetchFailCount = 0;
+          throw err;
+        });
       }
-      return fetchCall(fn, args).catch(function(err){
-        log('فشل fetch:', fn, '->', (err && err.message), '— التحويل إلى الجسر');
-        fetchBroken = true;
-        return bridgeCall(fn, args);
+      return fetchCall(fn, args).then(function(data){
+        fetchFailCount = 0;
+        return data;
+      }).catch(function(err){
+        fetchFailCount++;
+        log('فشل fetch (' + fetchFailCount + '/' + FETCH_MAX_FAILS + '):', fn, '->', (err && err.message));
+        if (fetchFailCount >= FETCH_MAX_FAILS) {
+          log('التحويل إلى الجسر بعد ' + FETCH_MAX_FAILS + ' محاولات فاشلة');
+          return bridgeCall(fn, args);
+        }
+        throw err;
       }).catch(function(err){
         log('فشل الطلب نهائيًا:', fn, '->', err && err.message);
         throw err;
