@@ -100,10 +100,11 @@ function finishLogin(no, r){
 }
 function doLogin(ev){
   if(ev && ev.preventDefault) ev.preventDefault();
+  var btn=document.getElementById('loginBtn');
+  if(btn && btn.disabled) return;
   var no=document.getElementById('empNo').value.trim();
   var pw=document.getElementById('pw');
   var pass=pw ? pw.value : '';
-  var btn=document.getElementById('loginBtn');
   setAuthError('loginErr','');
   if(!no || !pass){ setAuthError('loginErr','أدخل الرقم الوظيفي وكلمة المرور.'); return; }
   setButtonBusy(btn,true,'جارٍ التحقق…');
