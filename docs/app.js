@@ -236,10 +236,12 @@ function doResetWithCode(){
 }
 
 /* ====================== الملف الشخصي ====================== */
+var _profileCache = null;
 function renderProfile(){
   var view=document.getElementById('view');
   view.innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
   run('getMyProfile', USER.no).then(function(p){
+    _profileCache = p;
     view.innerHTML=
     '<div class="card">'+
       '<h2>الملف الشخصي</h2>'+
@@ -251,18 +253,30 @@ function renderProfile(){
       '</div>'+
       '<div class="section-divider"></div>'+
       '<div class="grid">'+
-        '<div class="field"><label>البريد الإلكتروني</label>'+
-          '<input id="profEmail" type="email" value="'+escAttr(p.email)+'" placeholder="example@moh.gov.om" autocomplete="off"></div>'+
-        '<div class="field"><label>رقم الهاتف</label>'+
-          '<input id="profPhone" type="tel" value="'+escAttr(p.phone)+'" placeholder="مثال: 9XXXXXXX" autocomplete="off"></div>'+
+        '<div class="field"><label>البريد الإلكتروني</label><div class="readonly-box">'+(p.email ? esc(p.email) : '<small>لم يُسجَّل بعد</small>')+'</div></div>'+
+        '<div class="field"><label>رقم الهاتف</label><div class="readonly-box">'+(p.phone ? esc(p.phone) : '<small>لم يُسجَّل بعد</small>')+'</div></div>'+
       '</div>'+
       '<p class="hint">البريد الإلكتروني المسجَّل هنا هو الذي يصلك عليه رمز التحقق عند استخدام «نسيت كلمة المرور» في شاشة الدخول.</p>'+
-      '<div class="login-err" id="profErr"></div>'+
-      '<div class="actions"><button class="btn btn-primary" id="profSaveBtn" onclick="saveProfile()">حفظ التغييرات</button></div>'+
+      '<div class="actions">'+
+        '<button class="btn btn-primary" onclick="openEditContactModal()">تعديل بيانات التواصل</button>'+
+        '<button class="btn btn-ghost" onclick="onTabClick(\'register\')">العودة للصفحة الرئيسية</button>'+
+      '</div>'+
     '</div>';
   }).catch(function(e){
     view.innerHTML='<div class="card"><p class="empty">'+esc((e && e.message) || 'تعذّر تحميل الملف الشخصي.')+'</p></div>';
   });
+}
+function openEditContactModal(){
+  var p=_profileCache || {};
+  var body=
+    '<div class="input-group"><label for="profEmail">البريد الإلكتروني</label>'+
+      '<input id="profEmail" type="email" value="'+escAttr(p.email)+'" placeholder="example@moh.gov.om" autocomplete="off"></div>'+
+    '<div class="input-group"><label for="profPhone">رقم الهاتف</label>'+
+      '<input id="profPhone" type="tel" value="'+escAttr(p.phone)+'" placeholder="مثال: 9XXXXXXX" autocomplete="off"></div>'+
+    '<div class="login-err" id="profErr"></div>';
+  openModal('تعديل بيانات التواصل', body,
+    '<button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>'+
+    '<button class="btn btn-primary" id="profSaveBtn" onclick="saveProfile()">حفظ التغييرات</button>');
 }
 function saveProfile(){
   var email=val('profEmail').trim();
@@ -272,7 +286,9 @@ function saveProfile(){
   setButtonBusy(btn,true,'جارٍ الحفظ…');
   run('updateMyProfile', USER.no, email, phone).then(function(r){
     if(!r || !r.ok){ setAuthError('profErr',(r && r.msg) || 'تعذّر الحفظ.'); return; }
+    closeModal();
     toast('تم حفظ الملف الشخصي.','ok');
+    renderProfile();
   }).catch(function(e){
     setAuthError('profErr',(e && e.message) ? e.message : 'تعذّر الحفظ.');
   }).finally(function(){

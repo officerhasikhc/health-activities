@@ -254,6 +254,22 @@ test('profile page is reachable only via the header name button, not the main ta
   }
 });
 
+test('contact info is read-only text edited through a dialog, with a way back to the home tab', () => {
+  for (const file of ['docs/app.js', 'src/JavaScript.html']) {
+    const js = read(file);
+    const renderProfileBody = js.slice(js.indexOf('function renderProfile('), js.indexOf('function openEditContactModal('));
+    assert.doesNotMatch(renderProfileBody, /<input/, file + ': the profile card itself must show read-only text, not inputs');
+    assert.match(renderProfileBody, /readonly-box.*p\.email/, file);
+    assert.match(renderProfileBody, /readonly-box.*p\.phone/, file);
+    assert.match(js, /function openEditContactModal\(\)/, file);
+    assert.match(js, /openModal\('تعديل بيانات التواصل'/, file);
+    assert.match(js, /<input id="profEmail" type="email"/, file + ': the edit dialog still needs the input');
+    assert.match(js, /<input id="profPhone" type="tel"/, file);
+    assert.match(js, /onclick="closeModal\(\)">إلغاء</, file);
+    assert.match(js, /onTabClick\([^)]*register[^)]*\)[^<]*>العودة للصفحة الرئيسية/, file);
+  }
+});
+
 test('forgot-password server API is exposed to both direct and bridge callers', () => {
   const code = read('src/Code.gs');
   const bridge = read('src/Bridge.html');
