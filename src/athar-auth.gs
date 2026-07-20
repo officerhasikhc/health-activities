@@ -6,13 +6,16 @@
  */
 
 var USER_HEADERS = ['emp_no','name','role','title','active',
-  'password_hash','salt','must_reset','pwd_updated_at'];
+  'password_hash','salt','must_reset','pwd_updated_at','email','phone'];
 var PWD_ITERATIONS = 4000;
 var PWD_ITERATIONS_LEGACY = 12000;
 var PWD_MIN_LEN = 6;
 var LOGIN_MAX_FAILS = 5;
 var LOGIN_LOCK_SECONDS = 300;
 var ELEVATED_ROLES = ['admin'];
+var RESET_CODE_TTL_SECONDS = 600;
+var RESET_CODE_MAX_ATTEMPTS = 5;
+var RESET_REQUEST_COOLDOWN_SECONDS = 60;
 
 function pepper_() {
   var p = PROP.getProperty('PWD_PEPPER');
@@ -166,15 +169,8 @@ function passwordStrengthError_(pw, empNo) {
   return '';
 }
 
-function changePassword(empNo, oldPassword, newPassword) {
-  empNo = String(empNo || '').trim();
-  var u = findActiveUser_(empNo);
-  if (!u) return { ok: false, msg: 'المستخدم غير موجود أو غير نشط.' };
-  if (!verifyPassword_(u, oldPassword)) return { ok: false, msg: 'كلمة المرور الحالية غير صحيحة.' };
-
-  var err = passwordStrengthError_(newPassword, empNo);
-  if (err) return { ok: false, msg: err };
-
+// يكتب كلمة مرور جديدة (هاش + ملح) لمستخدم، ويلغي إلزام إعادة التعيين. يُستخدم من changePassword وresetPasswordWithCode.
+function setUserPassword_(empNo, newPassword) {
   var sh = ss_().getSheetByName(SHEETS.USERS);
   ensureSheetHeaders_(sh, USER_HEADERS);
   var data = sh.getDataRange().getValues();
@@ -184,9 +180,7 @@ function changePassword(empNo, oldPassword, newPassword) {
   var iSalt = head.indexOf('salt');
   var iReset = head.indexOf('must_reset');
   var iUpd = head.indexOf('pwd_updated_at');
-  if (iNo < 0 || iHash < 0 || iSalt < 0 || iReset < 0) {
-    return { ok: false, msg: 'أعمدة المصادقة غير موجودة — شغّل upgradeAuth() أولًا.' };
-  }
+  if (iNo < 0 || iHash < 0 || iSalt < 0 || iReset < 0) return false;
 
   var salt = genSalt_();
   var hash = hashPassword_(newPassword, salt);
@@ -197,12 +191,147 @@ function changePassword(empNo, oldPassword, newPassword) {
       sh.getRange(row, iSalt + 1).setValue(salt);
       sh.getRange(row, iReset + 1).setValue(false);
       if (iUpd >= 0) sh.getRange(row, iUpd + 1).setValue(new Date());
+      CACHE.remove('users');
+      return true;
+    }
+  }
+  return false;
+}
+
+function changePassword(empNo, oldPassword, newPassword) {
+  empNo = String(empNo || '').trim();
+  var u = findActiveUser_(empNo);
+  if (!u) return { ok: false, msg: 'المستخدم غير موجود أو غير نشط.' };
+  if (!verifyPassword_(u, oldPassword)) return { ok: false, msg: 'كلمة المرور الحالية غير صحيحة.' };
+
+  var err = passwordStrengthError_(newPassword, empNo);
+  if (err) return { ok: false, msg: err };
+
+  if (!setUserPassword_(empNo, newPassword)) {
+    return { ok: false, msg: 'أعمدة المصادقة غير موجودة — شغّل upgradeAuth() أولًا.' };
+  }
+  try { logAudit_({ emp_no: u.emp_no, name: u.name }, 'password_changed', ''); } catch (e2) {}
+  return { ok: true };
+}
+
+// ============================ نسيت كلمة المرور ============================
+function resetCodeKey_(empNo) { return 'pwdreset_' + empNo; }
+function resetCooldownKey_(empNo) { return 'pwdresetcd_' + empNo; }
+
+// رسالة عامة موحّدة في كل الحالات (مسجّل/غير مسجّل/بلا بريد) لمنع استكشاف الأرقام الوظيفية.
+var RESET_REQUEST_GENERIC_MSG = 'إذا كان بريدك الإلكتروني مسجّلاً في ملفك الشخصي، فسيصلك رمز التحقق خلال لحظات.';
+
+function requestPasswordReset(empNo) {
+  empNo = String(empNo || '').trim();
+  var generic = { ok: true, msg: RESET_REQUEST_GENERIC_MSG };
+  if (!empNo) return generic;
+
+  var u = findActiveUser_(empNo);
+  if (!u || !u.email) return generic;
+  if (CACHE.get(resetCooldownKey_(empNo))) return generic;
+
+  var code = String(Math.floor(100000 + Math.random() * 900000));
+  CACHE.put(resetCodeKey_(empNo), JSON.stringify({ code: code, attempts: 0 }), RESET_CODE_TTL_SECONDS);
+  CACHE.put(resetCooldownKey_(empNo), '1', RESET_REQUEST_COOLDOWN_SECONDS);
+
+  try {
+    MailApp.sendEmail({
+      to: u.email,
+      subject: 'رمز إعادة تعيين كلمة المرور — منصة أثر',
+      body: 'مرحبًا ' + u.name + '،\n\n' +
+        'رمز إعادة تعيين كلمة المرور الخاص بك هو: ' + code + '\n' +
+        'الرمز صالح لمدة 10 دقائق ولا يُستخدم إلا مرة واحدة.\n\n' +
+        'إذا لم تطلب هذا الرمز، تجاهل هذه الرسالة ولا حاجة لأي إجراء.\n\n' +
+        'منصة أثر — المديرية العامة للخدمات الصحية بمحافظة ظفار'
+    });
+    logAudit_({ emp_no: u.emp_no, name: u.name }, 'password_reset_requested', '');
+  } catch (e) {}
+  return generic;
+}
+
+function resetPasswordWithCode(empNo, code, newPassword) {
+  empNo = String(empNo || '').trim();
+  var badCode = { ok: false, msg: 'الرمز غير صحيح أو منتهي الصلاحية. اطلب رمزًا جديدًا.' };
+
+  var u = findActiveUser_(empNo);
+  if (!u) return badCode;
+
+  var key = resetCodeKey_(empNo);
+  var raw = CACHE.get(key);
+  if (!raw) return badCode;
+
+  var state;
+  try { state = JSON.parse(raw); } catch (e) { state = null; }
+  if (!state) return badCode;
+
+  if (state.attempts >= RESET_CODE_MAX_ATTEMPTS) {
+    CACHE.remove(key);
+    return { ok: false, msg: 'محاولات كثيرة خاطئة. اطلب رمزًا جديدًا.' };
+  }
+  if (!constantTimeEq_(String(code || '').trim(), state.code)) {
+    state.attempts++;
+    CACHE.put(key, JSON.stringify(state), RESET_CODE_TTL_SECONDS);
+    return { ok: false, msg: 'الرمز غير صحيح.' };
+  }
+
+  var err = passwordStrengthError_(newPassword, empNo);
+  if (err) return { ok: false, msg: err };
+
+  if (!setUserPassword_(empNo, newPassword)) {
+    return { ok: false, msg: 'أعمدة المصادقة غير موجودة — شغّل upgradeAuth() أولًا.' };
+  }
+  CACHE.remove(key);
+  clearFails_(empNo);
+  try { logAudit_({ emp_no: u.emp_no, name: u.name }, 'password_reset_completed', ''); } catch (e2) {}
+  return { ok: true };
+}
+
+// ============================ الملف الشخصي ============================
+function isValidEmail_(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '')); }
+function isValidPhone_(phone) { return /^[0-9+\-\s]{7,20}$/.test(String(phone || '')); }
+
+function getMyProfile(empNo) {
+  var u = requireActiveUser_(empNo);
+  return { no: u.emp_no, name: u.name, role: u.role, title: u.title || '', email: u.email || '', phone: u.phone || '' };
+}
+
+function updateMyProfile(empNo, email, phone) {
+  empNo = String(empNo || '').trim();
+  var u = requireActiveUser_(empNo);
+  email = String(email || '').trim();
+  phone = String(phone || '').trim();
+  if (email && !isValidEmail_(email)) return { ok: false, msg: 'صيغة البريد الإلكتروني غير صحيحة.' };
+  if (phone && !isValidPhone_(phone)) return { ok: false, msg: 'صيغة رقم الهاتف غير صحيحة.' };
+
+  if (email) {
+    var taken = getUsers_().some(function (x) {
+      return String(x.emp_no) !== empNo && isActive_(x.active) &&
+        String(x.email || '').toLowerCase() === email.toLowerCase();
+    });
+    if (taken) return { ok: false, msg: 'هذا البريد الإلكتروني مسجَّل لموظف آخر.' };
+  }
+
+  var sh = ss_().getSheetByName(SHEETS.USERS);
+  ensureSheetHeaders_(sh, USER_HEADERS);
+  var data = sh.getDataRange().getValues();
+  var head = data.shift();
+  var iNo = head.indexOf('emp_no');
+  var iEmail = head.indexOf('email');
+  var iPhone = head.indexOf('phone');
+  for (var r = 0; r < data.length; r++) {
+    if (String(data[r][iNo]) === empNo) {
+      var row = r + 2;
+      if (iEmail >= 0) sh.getRange(row, iEmail + 1).setValue(email);
+      if (iPhone >= 0) sh.getRange(row, iPhone + 1).setValue(phone);
       break;
     }
   }
   CACHE.remove('users');
-  try { logAudit_({ emp_no: u.emp_no, name: u.name }, 'password_changed', ''); } catch (e2) {}
-  return { ok: true };
+  var changed = [];
+  if (String(u.email || '') !== email) changed.push('email');
+  if (String(u.phone || '') !== phone) changed.push('phone');
+  try { logAudit_({ emp_no: u.emp_no, name: u.name }, 'profile_updated', changed.join(',')); } catch (e2) {}
+  return { ok: true, email: email, phone: phone };
 }
 
 function adminAddUser(actorEmpNo, empNo, name, role, title, institution) {

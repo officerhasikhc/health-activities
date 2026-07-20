@@ -121,6 +121,10 @@ var API_METHODS = {
   removeConfigItem: true,
   setRequiredField: true,
   changePassword: true,
+  requestPasswordReset: true,
+  resetPasswordWithCode: true,
+  getMyProfile: true,
+  updateMyProfile: true,
   logClientError: true
 };
 

@@ -1,4 +1,4 @@
-var CACHE_NAME = 'athar-shell-v21';
+var CACHE_NAME = 'athar-shell-v22';
 var THUMB_CACHE = 'athar-thumbs-v1';
 var THUMB_MAX_AGE = 24 * 60 * 60 * 1000; // يوم واحد
 var SHELL = [
