@@ -47,6 +47,59 @@
       </div>
       <div class="login-err" id="loginErr"></div>
       <div class="login-note">كلمة المرور لأول دخول هي رقمك الوظيفي، وسيُطلب منك تغييرها فورًا.</div>
+      <button type="button" class="text-link" onclick="showForgotScreen()">نسيت كلمة المرور؟</button>
+    </form>
+  </div>
+
+  <!-- ===================== شاشة نسيت كلمة المرور ===================== -->
+  <div id="forgotScreen" class="login-wrap hidden">
+    <form class="login-card" id="forgotForm" autocomplete="off" onsubmit="return false;">
+      <? if (LOGIN_LOGO_URI) { ?>
+        <img class="login-logo" src="<?!= LOGIN_LOGO_URI ?>" alt="شعار وزارة الصحة">
+      <? } ?>
+      <div class="brand">نسيت كلمة المرور</div>
+      <div class="brand-sub">استرجاع الدخول عبر البريد الإلكتروني المسجّل في ملفك الشخصي</div>
+
+      <div id="forgotStep1">
+        <div class="login-instructions">أدخل رقمك الوظيفي، وسنرسل رمز تحقق إلى بريدك الإلكتروني المسجّل.</div>
+        <div class="input-group">
+          <label for="forgotEmpNo">الرقم الوظيفي</label>
+          <input id="forgotEmpNo" type="text" inputmode="numeric" placeholder="مثال: 12345" autocomplete="username" autocapitalize="off" spellcheck="false">
+        </div>
+        <div class="login-actions">
+          <button class="btn btn-primary btn-large" id="forgotSendBtn" type="button" onclick="doRequestReset()">إرسال رمز التحقق</button>
+          <button class="btn btn-ghost btn-large" type="button" onclick="showLoginScreen()">رجوع لتسجيل الدخول</button>
+        </div>
+      </div>
+
+      <div id="forgotStep2" class="hidden">
+        <div class="login-instructions" id="forgotStep2Msg">أدخل رمز التحقق وكلمة المرور الجديدة.</div>
+        <div class="input-group">
+          <label for="resetCode">رمز التحقق</label>
+          <input id="resetCode" type="text" inputmode="numeric" maxlength="6" placeholder="ادخل الرمز المكوّن من ٦ أرقام">
+        </div>
+        <div class="input-group">
+          <label for="forgotNewPw">كلمة المرور الجديدة</label>
+          <div class="pw-wrap">
+            <input id="forgotNewPw" type="password" autocomplete="new-password" placeholder="٦ أحرف على الأقل، حرف ورقم">
+            <button type="button" class="pw-toggle" data-for="forgotNewPw">إظهار</button>
+          </div>
+        </div>
+        <div class="input-group">
+          <label for="forgotNewPw2">تأكيد كلمة المرور</label>
+          <div class="pw-wrap">
+            <input id="forgotNewPw2" type="password" autocomplete="new-password" placeholder="أعد كتابتها">
+            <button type="button" class="pw-toggle" data-for="forgotNewPw2">إظهار</button>
+          </div>
+        </div>
+        <div class="login-actions">
+          <button class="btn btn-primary btn-large" id="forgotSaveBtn" type="button" onclick="doResetWithCode()">حفظ كلمة المرور</button>
+          <button class="btn btn-ghost btn-large" type="button" onclick="backToForgotStep1()">لم يصلني الرمز</button>
+        </div>
+        <div class="login-note">إن لم تصلك الرسالة خلال دقائق، راجع المسؤول لتحديث بريدك من صفحة ملفك الشخصي.</div>
+      </div>
+
+      <div class="login-err" id="forgotErr"></div>
     </form>
   </div>
 
@@ -108,8 +161,10 @@
             </div>
             <div id="bellPanel" class="bell-panel hidden"></div>
           </div>
-          <b id="whoName"></b>
-          <span id="whoTitle"></span>
+          <button type="button" class="who-btn" onclick="onTabClick('profile')" title="الملف الشخصي">
+            <b id="whoName"></b>
+            <span id="whoTitle"></span>
+          </button>
         </div>
         <button class="btn-logout" onclick="logout()">خروج</button>
       </div>

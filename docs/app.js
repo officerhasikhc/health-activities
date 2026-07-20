@@ -166,6 +166,119 @@ function doChangePassword(ev){
     setButtonBusy(btn,false,'');
   });
 }
+/* ====================== نسيت كلمة المرور ====================== */
+var _forgotEmpNo = '';
+function showForgotScreen(){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('forgotScreen').classList.remove('hidden');
+  setAuthError('forgotErr','');
+  document.getElementById('forgotStep1').classList.remove('hidden');
+  document.getElementById('forgotStep2').classList.add('hidden');
+  var from=document.getElementById('empNo');
+  var to=document.getElementById('forgotEmpNo');
+  if(to) to.value = from ? from.value : '';
+}
+function showLoginScreen(){
+  document.getElementById('forgotScreen').classList.add('hidden');
+  document.getElementById('loginScreen').classList.remove('hidden');
+}
+function backToForgotStep1(){
+  setAuthError('forgotErr','');
+  document.getElementById('forgotStep2').classList.add('hidden');
+  document.getElementById('forgotStep1').classList.remove('hidden');
+}
+function doRequestReset(){
+  var no=val('forgotEmpNo').trim();
+  var btn=document.getElementById('forgotSendBtn');
+  setAuthError('forgotErr','');
+  if(!no){ setAuthError('forgotErr','أدخل الرقم الوظيفي.'); return; }
+  setButtonBusy(btn,true,'جارٍ الإرسال…');
+  run('requestPasswordReset', no).then(function(r){
+    _forgotEmpNo = no;
+    document.getElementById('forgotStep1').classList.add('hidden');
+    document.getElementById('forgotStep2').classList.remove('hidden');
+    document.getElementById('forgotStep2Msg').textContent=(r && r.msg) || 'إذا كان بريدك مسجّلاً، فسيصلك رمز التحقق خلال لحظات.';
+    var code=document.getElementById('resetCode');
+    if(code) code.focus();
+  }).catch(function(e){
+    setAuthError('forgotErr',(e && e.message) ? e.message : 'تعذّر الاتصال، أعد المحاولة.');
+  }).finally(function(){
+    setButtonBusy(btn,false,'');
+  });
+}
+function doResetWithCode(){
+  var code=val('resetCode').trim();
+  var p1=val('forgotNewPw');
+  var p2=val('forgotNewPw2');
+  var btn=document.getElementById('forgotSaveBtn');
+  setAuthError('forgotErr','');
+  if(!code){ setAuthError('forgotErr','أدخل رمز التحقق.'); return; }
+  if(p1 !== p2){ setAuthError('forgotErr','كلمتا المرور غير متطابقتين.'); return; }
+  if(p1.length < 6){ setAuthError('forgotErr','كلمة المرور يجب ألا تقل عن ٦ أحرف.'); return; }
+  if(/\s/.test(p1)){ setAuthError('forgotErr','لا تستخدم مسافات في كلمة المرور.'); return; }
+  if(!/[A-Za-z؀-ۿ]/.test(p1) || !/[0-9]/.test(p1)){
+    setAuthError('forgotErr','كلمة المرور يجب أن تحتوي على حرف ورقم.');
+    return;
+  }
+  if(String(p1) === String(_forgotEmpNo)){ setAuthError('forgotErr','لا يمكن أن تكون كلمة المرور هي الرقم الوظيفي.'); return; }
+  setButtonBusy(btn,true,'جارٍ الحفظ…');
+  run('resetPasswordWithCode', _forgotEmpNo, code, p1).then(function(r){
+    if(!r || !r.ok){ setAuthError('forgotErr',(r && r.msg) || 'تعذّر إعادة التعيين.'); return; }
+    toast('تم تغيير كلمة المرور، يمكنك الآن الدخول بها.','ok');
+    var emp=document.getElementById('empNo');
+    if(emp) emp.value=_forgotEmpNo;
+    showLoginScreen();
+  }).catch(function(e){
+    setAuthError('forgotErr',(e && e.message) ? e.message : 'تعذّر الاتصال، أعد المحاولة.');
+  }).finally(function(){
+    setButtonBusy(btn,false,'');
+  });
+}
+
+/* ====================== الملف الشخصي ====================== */
+function renderProfile(){
+  var view=document.getElementById('view');
+  view.innerHTML='<div class="loading"><span class="spin"></span> جارٍ التحميل…</div>';
+  run('getMyProfile', USER.no).then(function(p){
+    view.innerHTML=
+    '<div class="card">'+
+      '<h2>الملف الشخصي</h2>'+
+      '<p class="sub">بياناتك الأساسية، وبيانات التواصل المستخدمة لاسترجاع كلمة المرور.</p>'+
+      '<div class="grid">'+
+        '<div class="field"><label>الاسم</label><div class="readonly-box">'+esc(p.name)+'</div></div>'+
+        '<div class="field"><label>الرقم الوظيفي</label><div class="readonly-box">'+esc(p.no)+'</div></div>'+
+        (p.title ? '<div class="field full"><label>المسمى الوظيفي</label><div class="readonly-box">'+esc(p.title)+'</div></div>' : '')+
+      '</div>'+
+      '<div class="section-divider"></div>'+
+      '<div class="grid">'+
+        '<div class="field"><label>البريد الإلكتروني</label>'+
+          '<input id="profEmail" type="email" value="'+escAttr(p.email)+'" placeholder="example@moh.gov.om" autocomplete="off"></div>'+
+        '<div class="field"><label>رقم الهاتف</label>'+
+          '<input id="profPhone" type="tel" value="'+escAttr(p.phone)+'" placeholder="مثال: 9XXXXXXX" autocomplete="off"></div>'+
+      '</div>'+
+      '<p class="hint">البريد الإلكتروني المسجَّل هنا هو الذي يصلك عليه رمز التحقق عند استخدام «نسيت كلمة المرور» في شاشة الدخول.</p>'+
+      '<div class="login-err" id="profErr"></div>'+
+      '<div class="actions"><button class="btn btn-primary" id="profSaveBtn" onclick="saveProfile()">حفظ التغييرات</button></div>'+
+    '</div>';
+  }).catch(function(e){
+    view.innerHTML='<div class="card"><p class="empty">'+esc((e && e.message) || 'تعذّر تحميل الملف الشخصي.')+'</p></div>';
+  });
+}
+function saveProfile(){
+  var email=val('profEmail').trim();
+  var phone=val('profPhone').trim();
+  var btn=document.getElementById('profSaveBtn');
+  setAuthError('profErr','');
+  setButtonBusy(btn,true,'جارٍ الحفظ…');
+  run('updateMyProfile', USER.no, email, phone).then(function(r){
+    if(!r || !r.ok){ setAuthError('profErr',(r && r.msg) || 'تعذّر الحفظ.'); return; }
+    toast('تم حفظ الملف الشخصي.','ok');
+  }).catch(function(e){
+    setAuthError('profErr',(e && e.message) ? e.message : 'تعذّر الحفظ.');
+  }).finally(function(){
+    setButtonBusy(btn,false,'');
+  });
+}
 function logout(){
   confirmModal('تأكيد الخروج','هل تريد تسجيل الخروج من منصة أثر؟',function(){
     forceLogout('');
@@ -302,6 +415,7 @@ function renderTabs(){
     {id:'dashboard',label:'المؤشرات'}
   ];
   if(USER.role==='admin') tabs.push({id:'admin', label:'الإدارة'});
+  tabs.push({id:'profile', label:'الملف الشخصي'});
   document.getElementById('tabsBar').innerHTML=tabs.map(function(t){
     var warm=(t.id==='records'||t.id==='dashboard')?' onpointerenter="Warmup.intent(\''+t.id+'\')" ontouchstart="Warmup.intent(\''+t.id+'\')"':'';
     var badgeHtml = t.id==='records' ? '<span id="tabBadge_records" class="nav-badge hidden">جديد</span>' : '';
@@ -326,6 +440,7 @@ function show(tab){
   else if(tab==='records') renderRecords();
   else if(tab==='dashboard') renderDashboard();
   else if(tab==='admin') renderAdmin();
+  else if(tab==='profile') renderProfile();
 }
 
 function updateBellAndBadges(addedCount) {

@@ -37,6 +37,8 @@
   .topbar-spacer{flex:1}
   .who{font-size:12px;text-align:left;color:#dfe9ea;display:flex;align-items:center;gap:8px}
   .who b{display:block;font-size:12.5px;color:#fff;line-height:1.2}
+  .who-btn{background:none;border:none;padding:2px 0;margin:0;color:inherit;font:inherit;cursor:pointer}
+  .who-btn:hover b{text-decoration:underline}
   .bell-btn{position:relative;cursor:pointer;background:none;border:none;
     border-radius:4px;padding:4px;color:rgba(255,255,255,.75);display:flex;align-items:center;
     justify-content:center;transition:all .15s ease;line-height:0}
@@ -351,6 +353,9 @@
   .remember-row input{width:18px;height:18px;accent-color:var(--brand);cursor:pointer}
   .install-btn{margin-top:0 !important}
   .login-err{color:var(--err);font-size:13.5px;margin-top:12px;min-height:18px;font-weight:600}
+  .text-link{display:block;width:100%;margin:14px 0 0;padding:6px 0;background:none;border:none;
+    color:var(--brand);font-size:13px;font-family:inherit;text-decoration:underline;cursor:pointer;text-align:center}
+  .text-link:hover{color:var(--brand-deep)}
 
   .loading{text-align:center;color:var(--muted);padding:30px;font-size:13px}
   .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--line);
