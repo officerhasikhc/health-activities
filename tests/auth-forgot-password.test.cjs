@@ -238,15 +238,19 @@ test('forgot-password screen exists with matching markup in both entrypoints', (
   }
 });
 
-test('dedicated profile tab is wired up identically in both client scripts', () => {
+test('profile page is reachable only via the header name button, not the main tabs row', () => {
   for (const file of ['docs/app.js', 'src/JavaScript.html']) {
     const js = read(file);
-    assert.match(js, /tabs\.push\(\{id:'profile', label:'الملف الشخصي'\}\)/, file);
+    assert.doesNotMatch(js, /tabs\.push\(\{id:'profile'/, file + ': profile must not appear in the main tabs row');
     assert.match(js, /else if\(tab==='profile'\) renderProfile\(\);/, file);
     assert.match(js, /function renderProfile\(\)/, file);
     assert.match(js, /function saveProfile\(\)/, file);
     assert.match(js, /run\('getMyProfile', USER\.no\)/, file);
     assert.match(js, /run\('updateMyProfile', USER\.no, email, phone\)/, file);
+  }
+  for (const file of ['docs/index.html', 'src/Index.html']) {
+    const html = read(file);
+    assert.match(html, /class="who-btn" onclick="onTabClick\('profile'\)"/, file);
   }
 });
 
