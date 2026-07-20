@@ -781,6 +781,14 @@ function saveActivityLocked_(payload, actorEmpNo) {
   return { ok:true, id:id };
 }
 
+function logServerError_(context, err) {
+  try {
+    var msg = (err && err.message) ? err.message : String(err || 'unknown error');
+    var stack = (err && err.stack) ? '\n' + err.stack : '';
+    console.error('[Athar] ' + context + ': ' + msg + stack);
+  } catch (_) {}
+}
+
 function logAudit_(actor, action, targetTitle) {
   try {
     var ss = ss_();
@@ -799,7 +807,9 @@ function logAudit_(actor, action, targetTitle) {
       }
       if (rowsToDelete > 0) sh.deleteRows(2, rowsToDelete);
     }
-  } catch(e) {}
+  } catch(e) {
+    logServerError_('audit append failed: ' + action, e);
+  }
 }
 
 function writeActivityRow_(sh, row, rowIndex) {
