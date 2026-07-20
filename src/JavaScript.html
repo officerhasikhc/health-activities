@@ -420,7 +420,6 @@ function renderTabs(){
     {id:'dashboard',label:'المؤشرات'}
   ];
   if(USER.role==='admin') tabs.push({id:'admin', label:'الإدارة'});
-  tabs.push({id:'profile', label:'الملف الشخصي'});
   document.getElementById('tabsBar').innerHTML=tabs.map(function(t){
     var warm=(t.id==='records'||t.id==='dashboard')?' onpointerenter="Warmup.intent(\''+t.id+'\')" ontouchstart="Warmup.intent(\''+t.id+'\')"':'';
     var badgeHtml = (t.id==='records' && !isAdmin_()) ? '<span id="tabBadge_records" class="nav-badge hidden">جديد</span>' : '';
