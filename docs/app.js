@@ -1745,8 +1745,15 @@ function miniRecord(o){
 }
 
 /* ====================== الإدارة ====================== */
+var _adminUsersCache = [];
 function renderAdmin(){
   document.getElementById('view').innerHTML=
+  '<div class="card">'+
+    '<h2>الموظفون</h2>'+
+    '<p class="sub">تعديل بيانات موظف آخر (الاسم، المسمى، البريد، الهاتف) أو إعادة تعيين كلمة مروره إلى الرقم الوظيفي الافتراضي.</p>'+
+    '<input type="text" id="empFilter" placeholder="بحث بالاسم أو الرقم الوظيفي" oninput="renderEmpList()" style="margin-bottom:12px">'+
+    '<div id="empList"><div class="loading"><span class="spin"></span> جارٍ التحميل…</div></div>'+
+  '</div>'+
   '<div class="card">'+
     '<h2>إدارة القوائم</h2>'+
     '<p class="sub">أي إضافة هنا تنعكس مباشرةً في نماذج التسجيل لكل المستخدمين.</p>'+
@@ -1763,6 +1770,87 @@ function renderAdmin(){
     '<p class="sub">تصدير PDF متاح من زر PDF داخل سجل البرامج والمبادرات الصحية، وتصدير Excel متاح حسب الفترة المختارة.</p>'+
     '<button class="btn btn-excel" onclick="show(\'records\')">الانتقال للبرامج</button>'+
   '</div>';
+  loadAdminUsers();
+}
+function loadAdminUsers(){
+  run('getUsersForAdmin', USER.no).then(function(list){
+    _adminUsersCache = list || [];
+    renderEmpList();
+  }).catch(function(e){
+    var box=document.getElementById('empList');
+    if(box) box.innerHTML='<div class="empty">تعذّر تحميل قائمة الموظفين: '+esc((e&&e.message)||'خطأ غير معروف')+'</div>';
+  });
+}
+function renderEmpList(){
+  var box=document.getElementById('empList');
+  if(!box) return;
+  var q=(val('empFilter')||'').trim().toLowerCase();
+  var list=_adminUsersCache.filter(function(u){
+    if(!q) return true;
+    return (u.name||'').toLowerCase().indexOf(q)>-1 || String(u.no).indexOf(q)>-1;
+  });
+  if(!list.length){ box.innerHTML='<div class="empty">لا يوجد موظفون مطابقون.</div>'; return; }
+  box.innerHTML=list.map(function(u){
+    return '<div class="req-setting" style="margin-bottom:10px">'+
+      '<div>'+
+        '<b>'+esc(u.name)+' <span style="font-weight:400;color:var(--muted)">('+esc(u.no)+')</span></b>'+
+        '<span>'+(u.title?esc(u.title)+' · ':'')+'البريد: '+(u.email?esc(u.email):'لم يُسجَّل بعد')+' · الهاتف: '+(u.phone?esc(u.phone):'لم يُسجَّل بعد')+'</span>'+
+      '</div>'+
+      '<div class="actions" style="margin:0">'+
+        '<button class="btn btn-ghost btn-sm" onclick="openEditEmployeeModal(\''+escAttr(u.no)+'\')">تعديل البيانات</button>'+
+        '<button class="btn btn-ghost btn-sm" onclick="confirmResetEmployeePassword(\''+escAttr(u.no)+'\')">إعادة تعيين كلمة المرور</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+function confirmResetEmployeePassword(empNo){
+  var u=_adminUsersCache.filter(function(x){ return String(x.no)===String(empNo); })[0];
+  var label=u?(u.name+' ('+u.no+')'):empNo;
+  confirmModal('إعادة تعيين كلمة المرور','سيتم إعادة تعيين كلمة مرور '+esc(label)+' إلى رقمه الوظيفي الافتراضي. متابعة؟',function(){
+    run('adminResetPassword', USER.no, empNo).then(function(r){
+      if(!r || !r.ok){ toast((r&&r.msg)||'تعذّر إعادة التعيين.','err'); return; }
+      toast(r.msg||'تمت إعادة التعيين.','ok');
+    }).catch(function(e){
+      toast((e&&e.message)||'تعذّر إعادة التعيين.','err');
+    });
+  });
+}
+function openEditEmployeeModal(empNo){
+  var u=_adminUsersCache.filter(function(x){ return String(x.no)===String(empNo); })[0];
+  if(!u) return;
+  var body=
+    '<div class="input-group"><label for="empEditName">الاسم</label>'+
+      '<input id="empEditName" type="text" value="'+escAttr(u.name)+'"></div>'+
+    '<div class="input-group"><label for="empEditTitle">المسمى الوظيفي</label>'+
+      '<input id="empEditTitle" type="text" value="'+escAttr(u.title)+'"></div>'+
+    '<div class="input-group"><label for="empEditEmail">البريد الإلكتروني</label>'+
+      '<input id="empEditEmail" type="email" value="'+escAttr(u.email)+'" placeholder="example@moh.gov.om" autocomplete="off"></div>'+
+    '<div class="input-group"><label for="empEditPhone">رقم الهاتف</label>'+
+      '<input id="empEditPhone" type="tel" value="'+escAttr(u.phone)+'" placeholder="مثال: 9XXXXXXX" autocomplete="off"></div>'+
+    '<div class="login-err" id="empEditErr"></div>';
+  openModal('تعديل بيانات '+esc(u.name), body,
+    '<button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>'+
+    '<button class="btn btn-primary" id="empEditSaveBtn" onclick="saveEmployeeEdit(\''+escAttr(empNo)+'\')">حفظ التغييرات</button>');
+}
+function saveEmployeeEdit(empNo){
+  var name=val('empEditName').trim();
+  var title=val('empEditTitle').trim();
+  var email=val('empEditEmail').trim();
+  var phone=val('empEditPhone').trim();
+  var btn=document.getElementById('empEditSaveBtn');
+  setAuthError('empEditErr','');
+  if(!name){ setAuthError('empEditErr','الاسم مطلوب.'); return; }
+  setButtonBusy(btn,true,'جارٍ الحفظ…');
+  run('adminUpdateUser', USER.no, empNo, name, title, email, phone).then(function(r){
+    if(!r || !r.ok){ setAuthError('empEditErr',(r && r.msg) || 'تعذّر الحفظ.'); return; }
+    closeModal();
+    toast('تم حفظ بيانات الموظف.','ok');
+    loadAdminUsers();
+  }).catch(function(e){
+    setAuthError('empEditErr',(e && e.message) ? e.message : 'تعذّر الحفظ.');
+  }).finally(function(){
+    setButtonBusy(btn,false,'');
+  });
 }
 function requiredFieldsBlock(){
   var meta=CONFIG.required_meta||[

@@ -44,8 +44,15 @@ function loadAuth() {
   const authPath = path.join(__dirname, '..', 'src', 'athar-auth.gs');
   const cacheStore = new Map();
   const sentEmails = [];
+  const loggedErrors = [];
+  const scriptAppState = {
+    requested: null,
+    status: 'NOT_REQUIRED',
+    authorizedScopes: ['https://www.googleapis.com/auth/script.send_mail'],
+    authorizationUrl: ''
+  };
   const context = {
-    console,
+    console: { ...console, error: (...args) => { loggedErrors.push(args.map(String).join(' ')); } },
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => '', setProperty: () => {} }) },
     CacheService: {
       getScriptCache: () => ({
@@ -65,7 +72,22 @@ function loadAuth() {
       DigestAlgorithm: { SHA_256: 'SHA_256', MD5: 'MD5' }
     },
     Session: { getScriptTimeZone: () => 'Asia/Muscat', getEffectiveUser: () => ({ getEmail: () => '' }) },
-    MailApp: { sendEmail: (opts) => { sentEmails.push(opts); } },
+    MailApp: {
+      getRemainingDailyQuota: () => 99,
+      sendEmail: (opts) => { sentEmails.push(opts); }
+    },
+    ScriptApp: {
+      AuthMode: { FULL: 'FULL' },
+      AuthorizationStatus: { REQUIRED: 'REQUIRED', NOT_REQUIRED: 'NOT_REQUIRED' },
+      getAuthorizationInfo: (authMode, scopes) => {
+        scriptAppState.requested = { authMode, scopes };
+        return {
+          getAuthorizationStatus: () => scriptAppState.status,
+          getAuthorizedScopes: () => scriptAppState.authorizedScopes,
+          getAuthorizationUrl: () => scriptAppState.authorizationUrl
+        };
+      }
+    },
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
     DriveApp: {},
     SpreadsheetApp: {},
@@ -79,6 +101,9 @@ function loadAuth() {
     vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
   }
   context._sentEmails = sentEmails;
+  context._cacheStore = cacheStore;
+  context._loggedErrors = loggedErrors;
+  context._scriptAppState = scriptAppState;
   context.logAudit_ = () => {};
   return context;
 }
@@ -119,11 +144,58 @@ test('requestPasswordReset returns the identical generic message for unknown, em
 test('requestPasswordReset respects the resend cooldown', () => {
   const ctx = loadAuth();
   withRoster(ctx, ROSTER);
+  const audits = [];
+  ctx.logAudit_ = (actor, action, target) => { audits.push({ actor, action, target }); };
 
   ctx.requestPasswordReset('65886');
   ctx.requestPasswordReset('65886');
 
   assert.equal(ctx._sentEmails.length, 1, 'second immediate request is throttled, no duplicate email');
+  assert.deepEqual(audits.map((a) => a.action), ['password_reset_requested', 'password_reset_rate_limited']);
+});
+
+test('requestPasswordReset logs active accounts that do not have recovery email without revealing that to the client', () => {
+  const ctx = loadAuth();
+  withRoster(ctx, ROSTER);
+  const audits = [];
+  ctx.logAudit_ = (actor, action, target) => { audits.push({ actor, action, target }); };
+
+  const noEmail = ctx.requestPasswordReset('67204');
+  const valid = ctx.requestPasswordReset('65886');
+
+  assert.equal(noEmail.ok, true);
+  assert.equal(valid.ok, true);
+  assert.equal(noEmail.msg, valid.msg);
+  assert.equal(ctx._sentEmails.length, 1, 'only the account with a registered email receives mail');
+  assert.deepEqual(audits.map((a) => a.action), ['password_reset_no_email', 'password_reset_requested']);
+});
+
+test('requestPasswordReset logs send failures without caching a usable code or starting cooldown', () => {
+  const ctx = loadAuth();
+  withRoster(ctx, ROSTER);
+  const audits = [];
+  let attempts = 0;
+  ctx.logAudit_ = (actor, action, target) => { audits.push({ actor, action, target }); };
+  ctx.MailApp.sendEmail = (opts) => {
+    attempts++;
+    if (attempts === 1) throw new Error('Missing permission: script.send_mail');
+    ctx._sentEmails.push(opts);
+  };
+
+  const failed = ctx.requestPasswordReset('65886');
+
+  assert.equal(failed.ok, true);
+  assert.match(failed.msg, /إذا كان بريدك الإلكتروني/);
+  assert.equal(ctx.CACHE.get(ctx.resetCodeKey_('65886')), null, 'failed sends must not leave a usable reset code');
+  assert.equal(ctx.CACHE.get(ctx.resetCooldownKey_('65886')), null, 'failed sends must not start resend cooldown');
+  assert.deepEqual(audits.map((a) => a.action), ['password_reset_send_failed']);
+  assert.match(audits[0].target, /script\.send_mail/);
+  assert.match(ctx._loggedErrors.join('\n'), /password reset email send failed/);
+
+  ctx.requestPasswordReset('65886');
+
+  assert.equal(attempts, 2, 'the user can retry immediately after a send failure');
+  assert.equal(ctx._sentEmails.length, 1);
 });
 
 test('resetPasswordWithCode rejects a code that was never requested', () => {
@@ -277,4 +349,78 @@ test('forgot-password server API is exposed to both direct and bridge callers', 
     assert.match(code, new RegExp(fn + ':\\s*true'), 'src/Code.gs: ' + fn);
     assert.match(bridge, new RegExp(fn + ':\\s*true'), 'src/Bridge.html: ' + fn);
   }
+});
+
+test('manifest declares the MailApp send scope used by password recovery', () => {
+  const codeUsesMail = /MailApp\s*\./.test(read('src/Code.gs')) || /MailApp\s*\./.test(read('src/athar-auth.gs'));
+  const manifest = JSON.parse(read('src/appsscript.json'));
+
+  if (codeUsesMail) {
+    assert.ok(
+      manifest.oauthScopes.includes('https://www.googleapis.com/auth/script.send_mail'),
+      'src/appsscript.json must include script.send_mail when MailApp is used'
+    );
+  }
+});
+
+test('diagnoseMailSetup checks mail authorization and can send a manual test email without exposing the function publicly', () => {
+  const ctx = loadAuth();
+
+  const r = ctx.diagnoseMailSetup('admin@example.com');
+
+  assert.equal(r.ok, true);
+  assert.equal(r.requiredScope, 'https://www.googleapis.com/auth/script.send_mail');
+  assert.equal(r.hasMailScope, true);
+  assert.equal(r.remainingDailyQuota, 99);
+  assert.equal(r.testEmailSent, true);
+  assert.equal(ctx._scriptAppState.requested.authMode, 'FULL');
+  assert.deepEqual(Array.from(ctx._scriptAppState.requested.scopes), ['https://www.googleapis.com/auth/script.send_mail']);
+  assert.equal(ctx._sentEmails.length, 1);
+  assert.equal(ctx._sentEmails[0].to, 'admin@example.com');
+
+  const code = read('src/Code.gs');
+  const bridge = read('src/Bridge.html');
+  assert.doesNotMatch(code, /diagnoseMailSetup:\s*true/);
+  assert.doesNotMatch(bridge, /diagnoseMailSetup:\s*true/);
+});
+
+test('diagnoseMailSetup stops before MailApp calls when mail authorization is still required', () => {
+  const ctx = loadAuth();
+  let quotaCalls = 0;
+  let sendCalls = 0;
+  ctx._scriptAppState.status = 'REQUIRED';
+  ctx._scriptAppState.authorizedScopes = [];
+  ctx._scriptAppState.authorizationUrl = 'https://script.google.com/auth';
+  ctx.MailApp.getRemainingDailyQuota = () => { quotaCalls++; throw new Error('must not call quota before authorization'); };
+  ctx.MailApp.sendEmail = () => { sendCalls++; throw new Error('must not send before authorization'); };
+
+  const r = ctx.diagnoseMailSetup('admin@example.com');
+
+  assert.equal(r.ok, false);
+  assert.equal(r.authorizationRequired, true);
+  assert.equal(r.authorizationUrl, 'https://script.google.com/auth');
+  assert.equal(r.remainingDailyQuota, null);
+  assert.equal(r.testEmailSent, false);
+  assert.equal(quotaCalls, 0);
+  assert.equal(sendCalls, 0);
+  assert.deepEqual(ctx._loggedErrors, []);
+  assert.match(r.errors.join('\n'), /التفويض/);
+});
+
+test('authorizeMailForAthar is a manual-only helper that touches MailApp to trigger consent', () => {
+  const ctx = loadAuth();
+
+  const r = ctx.authorizeMailForAthar('admin@example.com');
+
+  assert.equal(r.ok, true);
+  assert.equal(r.requiredScope, 'https://www.googleapis.com/auth/script.send_mail');
+  assert.equal(r.remainingDailyQuota, 99);
+  assert.equal(r.testEmailSent, true);
+  assert.equal(r.to, 'admin@example.com');
+  assert.equal(ctx._sentEmails.length, 1);
+
+  const code = read('src/Code.gs');
+  const bridge = read('src/Bridge.html');
+  assert.doesNotMatch(code, /authorizeMailForAthar:\s*true/);
+  assert.doesNotMatch(bridge, /authorizeMailForAthar:\s*true/);
 });

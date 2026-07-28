@@ -14,7 +14,7 @@
   var fetchFailCount = 0;   // عدد فشل fetch المتتالي — بعد 3 ننتقل للجسر
   var FETCH_MAX_FAILS = 3;
   var fetchProven = false;  // أوّل fetch نجح؟ بعدها نمنح مهلة أطول
-  var FETCH_PROBE_MS = 15000;
+  var FETCH_PROBE_MS = 28000; // أطول من ذي قبل لأن أول تشغيل للخادم (cold start) قد يتجاوز 15 ثانية
   var FETCH_FULL_MS = 60000;
   var bridgeFrame = null;
   var bridgeWindow = null;
@@ -137,7 +137,7 @@
     }).then(function(res){
       clearTimeout(timer);
       fetchProven = true;
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) { var httpErr = new Error('HTTP ' + res.status); httpErr.code = 'http'; throw httpErr; }
       return res.text();
     }).then(function(text){
       var payload;
@@ -150,6 +150,21 @@
       clearTimeout(timer);
       throw err;
     });
+  }
+
+  // تحويل الأخطاء التقنية الخام (abort/شبكة/HTTP) إلى رسالة عربية واضحة للمستخدم.
+  // رسائل الخادم الحقيقية (مثل "الرقم الوظيفي أو كلمة المرور غير صحيحة") تمر كما هي دون تعديل.
+  function friendlyFetchError_(err){
+    if (err && err.name === 'AbortError') {
+      return new Error('انتهت مهلة الاتصال بالخادم. تحقق من اتصالك ثم حاول مرة أخرى.');
+    }
+    if (err && typeof TypeError !== 'undefined' && err instanceof TypeError) {
+      return new Error('تعذّر الاتصال بالخادم. تحقق من اتصال الإنترنت وحاول مرة أخرى.');
+    }
+    if (err && err.code === 'http') {
+      return new Error('تعذّر الوصول إلى الخادم حاليًا. حاول مرة أخرى بعد قليل.');
+    }
+    return err;
   }
 
   // ---------- المسار 2: جسر iframe (احتياطي) ----------
@@ -172,7 +187,7 @@
           log('فشل الطلب عبر الجسر:', fn, '->', err && err.message);
           // الجسر فشل أيضًا — نعيد ضبط العدّاد لإعادة محاولة fetch
           fetchFailCount = 0;
-          throw err;
+          throw friendlyFetchError_(err);
         });
       }
       return fetchCall(fn, args).then(function(data){
@@ -188,7 +203,7 @@
         throw err;
       }).catch(function(err){
         log('فشل الطلب نهائيًا:', fn, '->', err && err.message);
-        throw err;
+        throw friendlyFetchError_(err);
       });
     },
     reload: reloadBridge,

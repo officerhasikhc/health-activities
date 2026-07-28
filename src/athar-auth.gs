@@ -16,6 +16,7 @@ var ELEVATED_ROLES = ['admin'];
 var RESET_CODE_TTL_SECONDS = 600;
 var RESET_CODE_MAX_ATTEMPTS = 5;
 var RESET_REQUEST_COOLDOWN_SECONDS = 60;
+var MAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/script.send_mail';
 
 function pepper_() {
   var p = PROP.getProperty('PWD_PEPPER');
@@ -221,19 +222,36 @@ function resetCooldownKey_(empNo) { return 'pwdresetcd_' + empNo; }
 // رسالة عامة موحّدة في كل الحالات (مسجّل/غير مسجّل/بلا بريد) لمنع استكشاف الأرقام الوظيفية.
 var RESET_REQUEST_GENERIC_MSG = 'إذا كان بريدك الإلكتروني مسجّلاً في ملفك الشخصي، فسيصلك رمز التحقق خلال لحظات.';
 
+function auditPasswordReset_(user, action, target) {
+  try {
+    logAudit_({ emp_no: user.emp_no || '', name: user.name || '' }, action, target || '');
+  } catch (e) {
+    logServerError_('password reset audit failed: ' + action, e);
+  }
+}
+
+function safeErrorText_(e) {
+  var msg = (e && e.message) ? e.message : String(e || 'unknown error');
+  return msg.slice(0, 180);
+}
+
 function requestPasswordReset(empNo) {
   empNo = String(empNo || '').trim();
   var generic = { ok: true, msg: RESET_REQUEST_GENERIC_MSG };
   if (!empNo) return generic;
 
   var u = findActiveUser_(empNo);
-  if (!u || !u.email) return generic;
-  if (CACHE.get(resetCooldownKey_(empNo))) return generic;
+  if (!u) return generic;
+  if (!u.email) {
+    auditPasswordReset_(u, 'password_reset_no_email', '');
+    return generic;
+  }
+  if (CACHE.get(resetCooldownKey_(empNo))) {
+    auditPasswordReset_(u, 'password_reset_rate_limited', '');
+    return generic;
+  }
 
   var code = String(Math.floor(100000 + Math.random() * 900000));
-  CACHE.put(resetCodeKey_(empNo), JSON.stringify({ code: code, attempts: 0 }), RESET_CODE_TTL_SECONDS);
-  CACHE.put(resetCooldownKey_(empNo), '1', RESET_REQUEST_COOLDOWN_SECONDS);
-
   try {
     MailApp.sendEmail({
       to: u.email,
@@ -244,9 +262,115 @@ function requestPasswordReset(empNo) {
         'إذا لم تطلب هذا الرمز، تجاهل هذه الرسالة ولا حاجة لأي إجراء.\n\n' +
         'منصة أثر — المديرية العامة للخدمات الصحية بمحافظة ظفار'
     });
-    logAudit_({ emp_no: u.emp_no, name: u.name }, 'password_reset_requested', '');
-  } catch (e) {}
+    CACHE.put(resetCodeKey_(empNo), JSON.stringify({ code: code, attempts: 0 }), RESET_CODE_TTL_SECONDS);
+    CACHE.put(resetCooldownKey_(empNo), '1', RESET_REQUEST_COOLDOWN_SECONDS);
+    auditPasswordReset_(u, 'password_reset_requested', '');
+  } catch (e) {
+    CACHE.remove(resetCodeKey_(empNo));
+    CACHE.remove(resetCooldownKey_(empNo));
+    auditPasswordReset_(u, 'password_reset_send_failed', safeErrorText_(e));
+    logServerError_('password reset email send failed for ' + empNo, e);
+  }
   return generic;
+}
+
+// شغّل هذه الدالة يدويًا من محرّر Apps Script بعد إضافة صلاحية البريد.
+// ليست ضمن API_METHODS أو Bridge؛ وظيفتها إجبار شاشة التفويض ثم إرسال اختبار اختياري.
+function authorizeMailForAthar(testEmail) {
+  var email = String(testEmail || ownerEmail_() || '').trim();
+  var out = {
+    ok: false,
+    requiredScope: MAIL_SEND_SCOPE,
+    remainingDailyQuota: MailApp.getRemainingDailyQuota(),
+    testEmailSent: false,
+    to: email
+  };
+
+  if (email) {
+    if (!isValidEmail_(email)) {
+      out.msg = 'صيغة البريد غير صحيحة.';
+      return out;
+    }
+    MailApp.sendEmail({
+      to: email,
+      subject: 'اختبار تفويض بريد منصة أثر',
+      body: 'تم تفويض صلاحية إرسال البريد لمنصة أثر بنجاح.'
+    });
+    out.testEmailSent = true;
+  }
+
+  out.ok = true;
+  return out;
+}
+
+// دالة يدوية من محرّر Apps Script فقط؛ ليست ضمن API_METHODS أو Bridge.
+function diagnoseMailSetup(testEmail) {
+  var out = {
+    ok: false,
+    requiredScope: MAIL_SEND_SCOPE,
+    authorizationStatus: 'unknown',
+    authorizationUrl: '',
+    authorizedScopes: null,
+    hasMailScope: false,
+    authorizationRequired: false,
+    remainingDailyQuota: null,
+    testEmailSent: false,
+    errors: []
+  };
+
+  try {
+    var authInfo = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL, [MAIL_SEND_SCOPE]);
+    var status = authInfo.getAuthorizationStatus();
+    out.authorizationStatus = String(status);
+    out.authorizationUrl = authInfo.getAuthorizationUrl ? (authInfo.getAuthorizationUrl() || '') : '';
+    out.authorizedScopes = authInfo.getAuthorizedScopes ? authInfo.getAuthorizedScopes() : null;
+    out.hasMailScope = out.authorizedScopes ?
+      out.authorizedScopes.indexOf(MAIL_SEND_SCOPE) >= 0 :
+      status === ScriptApp.AuthorizationStatus.NOT_REQUIRED;
+    out.authorizationRequired =
+      String(status) === String(ScriptApp.AuthorizationStatus.REQUIRED) || !out.hasMailScope;
+  } catch (e) {
+    out.errors.push('authorization: ' + safeErrorText_(e));
+    logServerError_('diagnoseMailSetup authorization check failed', e);
+    return out;
+  }
+
+  if (out.authorizationRequired) {
+    out.errors.push('التفويض مطلوب لصلاحية إرسال البريد. افتح رابط authorizationUrl أو شغّل الدالة بعد إعادة التفويض.');
+    return out;
+  }
+
+  try {
+    out.remainingDailyQuota = MailApp.getRemainingDailyQuota();
+  } catch (e2) {
+    out.errors.push('quota: ' + safeErrorText_(e2));
+    logServerError_('diagnoseMailSetup quota check failed', e2);
+  }
+
+  testEmail = String(testEmail || '').trim();
+  if (testEmail) {
+    if (!isValidEmail_(testEmail)) {
+      out.errors.push('testEmail: صيغة البريد غير صحيحة.');
+    } else {
+      try {
+        MailApp.sendEmail({
+          to: testEmail,
+          subject: 'اختبار بريد منصة أثر',
+          body: 'هذه رسالة اختبار من diagnoseMailSetup في منصة أثر.\nإذا وصلتك، فصلاحية إرسال البريد تعمل.'
+        });
+        out.testEmailSent = true;
+      } catch (e3) {
+        out.errors.push('send: ' + safeErrorText_(e3));
+        logServerError_('diagnoseMailSetup test email failed', e3);
+      }
+    }
+  }
+
+  out.ok = out.errors.length === 0 &&
+    out.remainingDailyQuota !== null &&
+    (out.hasMailScope || out.authorizationStatus === String(ScriptApp.AuthorizationStatus.NOT_REQUIRED)) &&
+    (!testEmail || out.testEmailSent);
+  return out;
 }
 
 function resetPasswordWithCode(empNo, code, newPassword) {
@@ -377,6 +501,62 @@ function adminResetPassword(actorEmpNo, empNo) {
     }
   }
   return { ok: false, msg: 'المستخدم غير موجود.' };
+}
+
+function getUsersForAdmin(actorEmpNo) {
+  requireAdmin_(actorEmpNo);
+  return getUsers_().filter(function (u) { return isActive_(u.active); }).map(function (u) {
+    return { no: String(u.emp_no), name: u.name, role: u.role, title: u.title || '', email: u.email || '', phone: u.phone || '' };
+  });
+}
+
+function adminUpdateUser(actorEmpNo, empNo, name, title, email, phone) {
+  requireAdmin_(actorEmpNo);
+  empNo = String(empNo || '').trim();
+  var u = requireActiveUser_(empNo);
+  name = String(name || '').trim();
+  title = String(title || '').trim();
+  email = String(email || '').trim();
+  phone = String(phone || '').trim();
+  if (!name) return { ok: false, msg: 'الاسم مطلوب.' };
+  if (email && !isValidEmail_(email)) return { ok: false, msg: 'صيغة البريد الإلكتروني غير صحيحة.' };
+  if (phone && !isValidPhone_(phone)) return { ok: false, msg: 'صيغة رقم الهاتف غير صحيحة.' };
+
+  if (email) {
+    var taken = getUsers_().some(function (x) {
+      return String(x.emp_no) !== empNo && isActive_(x.active) &&
+        String(x.email || '').toLowerCase() === email.toLowerCase();
+    });
+    if (taken) return { ok: false, msg: 'هذا البريد الإلكتروني مسجَّل لموظف آخر.' };
+  }
+
+  var sh = ss_().getSheetByName(SHEETS.USERS);
+  ensureSheetHeaders_(sh, USER_HEADERS);
+  var data = sh.getDataRange().getValues();
+  var head = data.shift();
+  var iNo = head.indexOf('emp_no');
+  var iName = head.indexOf('name');
+  var iTitle = head.indexOf('title');
+  var iEmail = head.indexOf('email');
+  var iPhone = head.indexOf('phone');
+  for (var r = 0; r < data.length; r++) {
+    if (String(data[r][iNo]) === empNo) {
+      var row = r + 2;
+      if (iName >= 0) sh.getRange(row, iName + 1).setValue(name);
+      if (iTitle >= 0) sh.getRange(row, iTitle + 1).setValue(title);
+      if (iEmail >= 0) sh.getRange(row, iEmail + 1).setValue(email);
+      if (iPhone >= 0) sh.getRange(row, iPhone + 1).setValue(phone);
+      break;
+    }
+  }
+  CACHE.remove('users');
+  var changed = [];
+  if (String(u.name || '') !== name) changed.push('name');
+  if (String(u.title || '') !== title) changed.push('title');
+  if (String(u.email || '') !== email) changed.push('email');
+  if (String(u.phone || '') !== phone) changed.push('phone');
+  try { logAudit_({ emp_no: actorEmpNo, name: '' }, 'admin_profile_updated', empNo + ':' + changed.join(',')); } catch (e2) {}
+  return { ok: true, name: name, title: title, email: email, phone: phone };
 }
 
 function upgradeAuth() {
