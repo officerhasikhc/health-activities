@@ -274,6 +274,35 @@ function requestPasswordReset(empNo) {
   return generic;
 }
 
+// شغّل هذه الدالة يدويًا من محرّر Apps Script بعد إضافة صلاحية البريد.
+// ليست ضمن API_METHODS أو Bridge؛ وظيفتها إجبار شاشة التفويض ثم إرسال اختبار اختياري.
+function authorizeMailForAthar(testEmail) {
+  var email = String(testEmail || ownerEmail_() || '').trim();
+  var out = {
+    ok: false,
+    requiredScope: MAIL_SEND_SCOPE,
+    remainingDailyQuota: MailApp.getRemainingDailyQuota(),
+    testEmailSent: false,
+    to: email
+  };
+
+  if (email) {
+    if (!isValidEmail_(email)) {
+      out.msg = 'صيغة البريد غير صحيحة.';
+      return out;
+    }
+    MailApp.sendEmail({
+      to: email,
+      subject: 'اختبار تفويض بريد منصة أثر',
+      body: 'تم تفويض صلاحية إرسال البريد لمنصة أثر بنجاح.'
+    });
+    out.testEmailSent = true;
+  }
+
+  out.ok = true;
+  return out;
+}
+
 // دالة يدوية من محرّر Apps Script فقط؛ ليست ضمن API_METHODS أو Bridge.
 function diagnoseMailSetup(testEmail) {
   var out = {
@@ -472,6 +501,62 @@ function adminResetPassword(actorEmpNo, empNo) {
     }
   }
   return { ok: false, msg: 'المستخدم غير موجود.' };
+}
+
+function getUsersForAdmin(actorEmpNo) {
+  requireAdmin_(actorEmpNo);
+  return getUsers_().filter(function (u) { return isActive_(u.active); }).map(function (u) {
+    return { no: String(u.emp_no), name: u.name, role: u.role, title: u.title || '', email: u.email || '', phone: u.phone || '' };
+  });
+}
+
+function adminUpdateUser(actorEmpNo, empNo, name, title, email, phone) {
+  requireAdmin_(actorEmpNo);
+  empNo = String(empNo || '').trim();
+  var u = requireActiveUser_(empNo);
+  name = String(name || '').trim();
+  title = String(title || '').trim();
+  email = String(email || '').trim();
+  phone = String(phone || '').trim();
+  if (!name) return { ok: false, msg: 'الاسم مطلوب.' };
+  if (email && !isValidEmail_(email)) return { ok: false, msg: 'صيغة البريد الإلكتروني غير صحيحة.' };
+  if (phone && !isValidPhone_(phone)) return { ok: false, msg: 'صيغة رقم الهاتف غير صحيحة.' };
+
+  if (email) {
+    var taken = getUsers_().some(function (x) {
+      return String(x.emp_no) !== empNo && isActive_(x.active) &&
+        String(x.email || '').toLowerCase() === email.toLowerCase();
+    });
+    if (taken) return { ok: false, msg: 'هذا البريد الإلكتروني مسجَّل لموظف آخر.' };
+  }
+
+  var sh = ss_().getSheetByName(SHEETS.USERS);
+  ensureSheetHeaders_(sh, USER_HEADERS);
+  var data = sh.getDataRange().getValues();
+  var head = data.shift();
+  var iNo = head.indexOf('emp_no');
+  var iName = head.indexOf('name');
+  var iTitle = head.indexOf('title');
+  var iEmail = head.indexOf('email');
+  var iPhone = head.indexOf('phone');
+  for (var r = 0; r < data.length; r++) {
+    if (String(data[r][iNo]) === empNo) {
+      var row = r + 2;
+      if (iName >= 0) sh.getRange(row, iName + 1).setValue(name);
+      if (iTitle >= 0) sh.getRange(row, iTitle + 1).setValue(title);
+      if (iEmail >= 0) sh.getRange(row, iEmail + 1).setValue(email);
+      if (iPhone >= 0) sh.getRange(row, iPhone + 1).setValue(phone);
+      break;
+    }
+  }
+  CACHE.remove('users');
+  var changed = [];
+  if (String(u.name || '') !== name) changed.push('name');
+  if (String(u.title || '') !== title) changed.push('title');
+  if (String(u.email || '') !== email) changed.push('email');
+  if (String(u.phone || '') !== phone) changed.push('phone');
+  try { logAudit_({ emp_no: actorEmpNo, name: '' }, 'admin_profile_updated', empNo + ':' + changed.join(',')); } catch (e2) {}
+  return { ok: true, name: name, title: title, email: email, phone: phone };
 }
 
 function upgradeAuth() {

@@ -406,3 +406,21 @@ test('diagnoseMailSetup stops before MailApp calls when mail authorization is st
   assert.deepEqual(ctx._loggedErrors, []);
   assert.match(r.errors.join('\n'), /التفويض/);
 });
+
+test('authorizeMailForAthar is a manual-only helper that touches MailApp to trigger consent', () => {
+  const ctx = loadAuth();
+
+  const r = ctx.authorizeMailForAthar('admin@example.com');
+
+  assert.equal(r.ok, true);
+  assert.equal(r.requiredScope, 'https://www.googleapis.com/auth/script.send_mail');
+  assert.equal(r.remainingDailyQuota, 99);
+  assert.equal(r.testEmailSent, true);
+  assert.equal(r.to, 'admin@example.com');
+  assert.equal(ctx._sentEmails.length, 1);
+
+  const code = read('src/Code.gs');
+  const bridge = read('src/Bridge.html');
+  assert.doesNotMatch(code, /authorizeMailForAthar:\s*true/);
+  assert.doesNotMatch(bridge, /authorizeMailForAthar:\s*true/);
+});

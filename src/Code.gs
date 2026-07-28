@@ -125,6 +125,9 @@ var API_METHODS = {
   resetPasswordWithCode: true,
   getMyProfile: true,
   updateMyProfile: true,
+  adminResetPassword: true,
+  getUsersForAdmin: true,
+  adminUpdateUser: true,
   logClientError: true
 };
 
